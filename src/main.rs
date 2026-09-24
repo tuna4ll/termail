@@ -4,6 +4,7 @@ use crossterm::event::{
 use futures::{FutureExt, StreamExt};
 use ratatui::{
     DefaultTerminal, Frame,
+    style::Stylize,
     widgets::{Block, Borders, List, ListItem},
 };
 
@@ -46,9 +47,9 @@ impl App {
 
     fn draw(&mut self, frame: &mut Frame) {
         let mails = vec![
-            ListItem::new("welcome to mailtui"),
-            ListItem::new("test mail"),
-            ListItem::new("hello from ratatui"),
+            ListItem::new("> welcome to mailtui").bold(),
+            ListItem::new("  test mail"),
+            ListItem::new("  hello from ratatui"),
         ];
 
         let list = List::new(mails).block(
