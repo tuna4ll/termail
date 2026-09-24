@@ -25,6 +25,7 @@ pub struct App {
     running: bool,
     event_stream: EventStream,
     selected: usize,
+    mails: Vec<String>,
 }
 
 impl Default for App {
@@ -33,6 +34,11 @@ impl Default for App {
             running: false,
             event_stream: EventStream::new(),
             selected: 0,
+            mails: vec![
+                "welcome to mailtui".into(),
+                "test mail".into(),
+                "hello from ratatui".into(),
+            ],
         }
     }
 }
@@ -57,13 +63,8 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let mails = [
-            "welcome to mailtui",
-            "test mail",
-            "hello from ratatui",
-        ];
-
-        let items: Vec<ListItem> = mails
+        let items: Vec<ListItem> = self
+            .mails
             .iter()
             .enumerate()
             .map(|(i, mail)| {
@@ -107,7 +108,7 @@ impl App {
             }
 
             (_, KeyCode::Down | KeyCode::Char('j')) => {
-                if self.selected < 2 {
+                if self.selected + 1 < self.mails.len() {
                     self.selected += 1;
                 }
             }
