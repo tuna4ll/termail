@@ -11,8 +11,30 @@ impl Workspace {
         let nodes = vec![
             Node::from_text(
                 "mail-1",
-                (10.0, 5.0),
-                "hello from mailtui",
+                (4.0, 3.0),
+                "from: termail@example.com\n\
+                 subject: project update\n\n\
+                 hey,\n\
+                 the new build is ready.\n\
+                 can you review it?",
+            ),
+
+            Node::from_text(
+                "mail-2",
+                (38.0, 8.0),
+                "from: tuna@tunakilic.com\n\
+                 subject: re: project update\n\n\
+                 sure, i'll check it\n\
+                 tonight.",
+            ),
+
+            Node::from_text(
+                "mail-3",
+                (70.0, 3.0),
+                "from: github@github.com\n\
+                 subject: pull request merged\n\n\
+                 your pull request #42\n\
+                 has been merged.",
             ),
         ];
 
