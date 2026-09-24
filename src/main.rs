@@ -20,10 +20,21 @@ async fn main() -> color_eyre::Result<()> {
     result
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct App {
     running: bool,
     event_stream: EventStream,
+    selected: usize,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            running: false,
+            event_stream: EventStream::new(),
+            selected: 0,
+        }
+    }
 }
 
 impl App {
@@ -46,13 +57,25 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let mails = vec![
-            ListItem::new("> welcome to mailtui").bold(),
-            ListItem::new("  test mail"),
-            ListItem::new("  hello from ratatui"),
+        let mails = [
+            "welcome to mailtui",
+            "test mail",
+            "hello from ratatui",
         ];
 
-        let list = List::new(mails).block(
+        let items: Vec<ListItem> = mails
+            .iter()
+            .enumerate()
+            .map(|(i, mail)| {
+                if i == self.selected {
+                    ListItem::new(format!("> {mail}")).bold()
+                } else {
+                    ListItem::new(format!("  {mail}"))
+                }
+            })
+            .collect();
+
+        let list = List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" inbox "),
@@ -81,6 +104,18 @@ impl App {
                 KeyCode::Char('c') | KeyCode::Char('C'),
             ) => {
                 self.running = false;
+            }
+
+            (_, KeyCode::Down | KeyCode::Char('j')) => {
+                if self.selected < 2 {
+                    self.selected += 1;
+                }
+            }
+
+            (_, KeyCode::Up | KeyCode::Char('k')) => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                }
             }
 
             _ => {}
