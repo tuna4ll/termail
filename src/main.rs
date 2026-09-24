@@ -1,9 +1,14 @@
+mod widgets;
+
+use widgets::workspace::Workspace;
+
 use crossterm::event::{
     Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
 use futures::{FutureExt, StreamExt};
 use ratatui::{
     DefaultTerminal, Frame,
+    layout::{Constraint, Direction, Layout},
     style::Stylize,
     widgets::{Block, Borders, List, ListItem},
 };
@@ -20,12 +25,12 @@ async fn main() -> color_eyre::Result<()> {
     result
 }
 
-#[derive(Debug)]
 pub struct App {
     running: bool,
     event_stream: EventStream,
     selected: usize,
     mails: Vec<String>,
+    workspace: Workspace,
 }
 
 impl Default for App {
@@ -39,6 +44,7 @@ impl Default for App {
                 "test mail".into(),
                 "hello from ratatui".into(),
             ],
+            workspace: Workspace::new(),
         }
     }
 }
@@ -63,6 +69,14 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        let areas = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(35),
+                Constraint::Percentage(65),
+            ])
+            .split(frame.area());
+
         let items: Vec<ListItem> = self
             .mails
             .iter()
@@ -82,7 +96,9 @@ impl App {
                 .title(" inbox "),
         );
 
-        frame.render_widget(list, frame.area());
+        frame.render_widget(list, areas[0]);
+
+        self.workspace.draw(frame, areas[1]);
     }
 
     async fn handle_events(&mut self) -> color_eyre::Result<()> {
