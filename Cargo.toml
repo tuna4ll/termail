@@ -1,0 +1,21 @@
+[package]
+name = "termail"
+version = "0.1.0"
+description = "A terminal email client with a spatial workspace for conversations."
+authors = ["Tuna Kılıç <tuna@tunakilic.com>"]
+license = "MIT"
+edition = "2024"
+
+[dependencies]
+color-eyre = "0.6.5"
+crossterm = { version = "0.29.0", features = ["event-stream"] }
+futures = "0.3.32"
+ratatui = "0.30.2"
+tokio = { version = "1.52.3", features = ["full"] }
+
+# Read the optimization guideline for more details: https://ratatui.rs/recipes/apps/release-your-app/#optimizations
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
