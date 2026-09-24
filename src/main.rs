@@ -2,8 +2,14 @@ mod widgets;
 
 use widgets::workspace::Workspace;
 
-use crossterm::event::{
-    Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+use std::io::stdout;
+
+use crossterm::{
+    event::{
+        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode,
+        KeyEvent, KeyEventKind, KeyModifiers,
+    },
+    execute,
 };
 use futures::{FutureExt, StreamExt};
 use ratatui::{
@@ -18,7 +24,12 @@ async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
     let terminal = ratatui::init();
+
+    execute!(stdout(), EnableMouseCapture)?;
+
     let result = App::new().run(terminal).await;
+
+    execute!(stdout(), DisableMouseCapture)?;
 
     ratatui::restore();
 
@@ -104,9 +115,17 @@ impl App {
     async fn handle_events(&mut self) -> color_eyre::Result<()> {
         let event = self.event_stream.next().fuse().await;
 
-        if let Some(Ok(Event::Key(key))) = event {
-            if key.kind == KeyEventKind::Press {
-                self.on_key_event(key);
+        if let Some(Ok(event)) = event {
+            match event {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    self.on_key_event(key);
+                }
+
+                Event::Mouse(mouse) => {
+                    self.workspace.handle_mouse(mouse);
+                }
+
+                _ => {}
             }
         }
 
