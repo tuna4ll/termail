@@ -1,7 +1,7 @@
 mod mail;
 mod widgets;
 
-use mail::Mail;
+use mail::{Mail, demo_mails};
 use widgets::workspace::Workspace;
 
 use std::io::stdout;
@@ -52,29 +52,7 @@ impl Default for App {
             running: false,
             event_stream: EventStream::new(),
             selected: 0,
-            mails: vec![
-                Mail::new(
-                    "mail-1",
-                    "termail@example.com",
-                    "project update",
-                    "hey,\nthe new build is ready.\ncan you review it?",
-                    None,
-                ),
-                Mail::new(
-                    "mail-2",
-                    "tuna@tunakilic.com",
-                    "re: project update",
-                    "sure, i'll check it tonight.",
-                    Some("mail-1"),
-                ),
-                Mail::new(
-                    "mail-3",
-                    "github@github.com",
-                    "pull request merged",
-                    "your pull request #42 has been merged.",
-                    None,
-                ),
-            ],
+            mails: demo_mails(),
             workspace: Workspace::new(),
         }
     }
