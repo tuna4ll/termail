@@ -80,7 +80,7 @@ impl App {
     fn draw(&mut self, frame: &mut Frame) {
         let areas = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+            .constraints([Constraint::Length(30), Constraint::Min(0)])
             .split(frame.area());
 
         let items: Vec<ListItem> = self
