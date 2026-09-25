@@ -134,3 +134,18 @@ fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
 
     &current.id
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{clip_line, wrap_preview};
+
+    #[test]
+    fn clips_long_lines() {
+        assert_eq!(clip_line("123456", 5), "1234…");
+    }
+
+    #[test]
+    fn wraps_and_marks_hidden_text() {
+        assert_eq!(wrap_preview("one two three four", 7, 2), "one two\nthree…");
+    }
+}
