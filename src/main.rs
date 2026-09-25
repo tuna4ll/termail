@@ -105,7 +105,7 @@ impl App {
 
         self.workspace.draw(frame, areas[1]);
 
-        if let Some(reader) = &self.reader
+        if let Some(reader) = &mut self.reader
             && let Some(mail) = self.mails.iter().find(|mail| mail.id == reader.mail_id())
         {
             reader.draw(frame, frame.area(), mail);
@@ -134,8 +134,17 @@ impl App {
 
     fn on_key_event(&mut self, key: KeyEvent) {
         if self.reader.is_some() {
-            if key.code == KeyCode::Esc {
-                self.reader = None;
+            match key.code {
+                KeyCode::Esc => self.reader = None,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.reader.as_mut().unwrap().scroll_down(1);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.reader.as_mut().unwrap().scroll_up(1);
+                }
+                KeyCode::PageDown => self.reader.as_mut().unwrap().scroll_down(5),
+                KeyCode::PageUp => self.reader.as_mut().unwrap().scroll_up(5),
+                _ => {}
             }
             return;
         }
