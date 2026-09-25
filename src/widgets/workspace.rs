@@ -32,9 +32,12 @@ fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent
         return Flow::new();
     };
     let selected_root_id = root_id(selected, mails);
-    let nodes = mails
+    let conversation: Vec<&Mail> = mails
         .iter()
         .filter(|mail| root_id(mail, mails) == selected_root_id)
+        .collect();
+    let nodes = conversation
+        .iter()
         .enumerate()
         .map(|(index, mail)| {
             Node::from_text(
@@ -47,7 +50,16 @@ fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent
             )
         })
         .collect();
-    let edges: Vec<Edge<StepEdge>> = vec![];
+    let edges: Vec<Edge<StepEdge>> = conversation
+        .iter()
+        .filter_map(|mail| {
+            let parent_id = mail.reply_to.as_deref()?;
+            conversation
+                .iter()
+                .any(|parent| parent.id == parent_id)
+                .then(|| Edge::new(format!("reply-{}", mail.id), parent_id, &mail.id))
+        })
+        .collect();
 
     Flow::with_graph(nodes, edges).unwrap()
 }
