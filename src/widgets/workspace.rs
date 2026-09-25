@@ -1,3 +1,4 @@
+use crate::mail::Mail;
 use crossterm::event::MouseEvent;
 use rataflow::{Edge, Flow, Node, StepEdge, TextContent};
 use ratatui::{Frame, layout::Rect};
@@ -7,40 +8,14 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub fn new() -> Self {
-        let nodes = vec![
-            Node::from_text(
-                "mail-1",
-                (4.0, 3.0),
-                "from: termail@example.com\n\
-                 subject: project update\n\n\
-                 hey,\n\
-                 the new build is ready.\n\
-                 can you review it?",
-            ),
-            Node::from_text(
-                "mail-2",
-                (38.0, 8.0),
-                "from: tuna@tunakilic.com\n\
-                 subject: re: project update\n\n\
-                 sure, i'll check it\n\
-                 tonight.",
-            ),
-            Node::from_text(
-                "mail-3",
-                (70.0, 3.0),
-                "from: github@github.com\n\
-                 subject: pull request merged\n\n\
-                 your pull request #42\n\
-                 has been merged.",
-            ),
-        ];
+    pub fn new(mails: &[Mail], selected_mail_id: &str) -> Self {
+        Self {
+            flow: conversation_flow(mails, selected_mail_id),
+        }
+    }
 
-        let edges: Vec<Edge<StepEdge>> = vec![];
-
-        let flow = Flow::with_graph(nodes, edges).unwrap();
-
-        Self { flow }
+    pub fn show_conversation(&mut self, mails: &[Mail], selected_mail_id: &str) {
+        self.flow = conversation_flow(mails, selected_mail_id);
     }
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
@@ -50,4 +25,42 @@ impl Workspace {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {
         let _ = self.flow.handle_mouse_event(mouse);
     }
+}
+
+fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent, StepEdge> {
+    let Some(selected) = mails.iter().find(|mail| mail.id == selected_mail_id) else {
+        return Flow::new();
+    };
+    let selected_root_id = root_id(selected, mails);
+    let nodes = mails
+        .iter()
+        .filter(|mail| root_id(mail, mails) == selected_root_id)
+        .enumerate()
+        .map(|(index, mail)| {
+            Node::from_text(
+                &mail.id,
+                (4.0 + index as f64 * 52.0, 3.0),
+                format!(
+                    "from: {}\nsubject: {}\n\n{}",
+                    mail.from, mail.subject, mail.body
+                ),
+            )
+        })
+        .collect();
+    let edges: Vec<Edge<StepEdge>> = vec![];
+
+    Flow::with_graph(nodes, edges).unwrap()
+}
+
+fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
+    let mut current = mail;
+
+    while let Some(parent_id) = &current.reply_to {
+        let Some(parent) = mails.iter().find(|mail| mail.id == *parent_id) else {
+            break;
+        };
+        current = parent;
+    }
+
+    &current.id
 }

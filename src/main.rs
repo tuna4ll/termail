@@ -48,12 +48,15 @@ pub struct App {
 
 impl Default for App {
     fn default() -> Self {
+        let mails = demo_mails();
+        let workspace = Workspace::new(&mails, &mails[0].id);
+
         Self {
             running: false,
             event_stream: EventStream::new(),
             selected: 0,
-            mails: demo_mails(),
-            workspace: Workspace::new(),
+            mails,
+            workspace,
         }
     }
 }
@@ -127,19 +130,22 @@ impl App {
                 self.running = false;
             }
 
-            (_, KeyCode::Down | KeyCode::Char('j')) => {
-                if self.selected + 1 < self.mails.len() {
-                    self.selected += 1;
-                }
+            (_, KeyCode::Down | KeyCode::Char('j')) if self.selected + 1 < self.mails.len() => {
+                self.selected += 1;
+                self.sync_workspace();
             }
 
-            (_, KeyCode::Up | KeyCode::Char('k')) => {
-                if self.selected > 0 {
-                    self.selected -= 1;
-                }
+            (_, KeyCode::Up | KeyCode::Char('k')) if self.selected > 0 => {
+                self.selected -= 1;
+                self.sync_workspace();
             }
 
             _ => {}
         }
+    }
+
+    fn sync_workspace(&mut self) {
+        self.workspace
+            .show_conversation(&self.mails, &self.mails[self.selected].id);
     }
 }
