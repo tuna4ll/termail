@@ -117,3 +117,25 @@ fn reader_area(area: Rect) -> Rect {
         height,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Reader, wrapped_line_count};
+
+    #[test]
+    fn counts_wrapped_and_blank_lines() {
+        assert_eq!(wrapped_line_count("one two three\n\nfour", 7), 4);
+        assert_eq!(wrapped_line_count("123456789", 4), 3);
+    }
+
+    #[test]
+    fn keeps_scroll_in_bounds() {
+        let mut reader = Reader::new("mail-1".into());
+        reader.max_scroll = 3;
+
+        reader.scroll_down(5);
+        assert_eq!(reader.scroll, 3);
+        reader.scroll_up(2);
+        assert_eq!(reader.scroll, 1);
+    }
+}
