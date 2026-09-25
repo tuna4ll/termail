@@ -2,6 +2,7 @@ mod mail;
 mod widgets;
 
 use mail::{Mail, demo_mails};
+use widgets::reader::Reader;
 use widgets::workspace::Workspace;
 
 use std::io::stdout;
@@ -44,6 +45,7 @@ pub struct App {
     selected: usize,
     mails: Vec<Mail>,
     workspace: Workspace,
+    reader: Option<Reader>,
 }
 
 impl Default for App {
@@ -57,6 +59,7 @@ impl Default for App {
             selected: 0,
             mails,
             workspace,
+            reader: None,
         }
     }
 }
@@ -101,6 +104,12 @@ impl App {
         frame.render_widget(list, areas[0]);
 
         self.workspace.draw(frame, areas[1]);
+
+        if let Some(reader) = &self.reader
+            && let Some(mail) = self.mails.iter().find(|mail| mail.id == reader.mail_id())
+        {
+            reader.draw(frame, frame.area(), mail);
+        }
     }
 
     async fn handle_events(&mut self) -> color_eyre::Result<()> {
@@ -124,6 +133,13 @@ impl App {
     }
 
     fn on_key_event(&mut self, key: KeyEvent) {
+        if self.reader.is_some() {
+            if key.code == KeyCode::Esc {
+                self.reader = None;
+            }
+            return;
+        }
+
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc | KeyCode::Char('q'))
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
@@ -138,6 +154,10 @@ impl App {
             (_, KeyCode::Up | KeyCode::Char('k')) if self.selected > 0 => {
                 self.selected -= 1;
                 self.sync_workspace();
+            }
+
+            (_, KeyCode::Enter) => {
+                self.reader = Some(Reader::new(self.mails[self.selected].id.clone()));
             }
 
             _ => {}
