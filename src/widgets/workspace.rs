@@ -50,6 +50,7 @@ fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent
                 mail_preview(mail),
             )
             .with_dimensions(CARD_WIDTH as f64, CARD_HEIGHT as f64)
+            .with_selected(mail.id == selected_mail_id)
         })
         .collect();
     let edges: Vec<Edge<StepEdge>> = conversation
