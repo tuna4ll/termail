@@ -1,13 +1,15 @@
+mod mail;
 mod widgets;
 
+use mail::Mail;
 use widgets::workspace::Workspace;
 
 use std::io::stdout;
 
 use crossterm::{
     event::{
-        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode,
-        KeyEvent, KeyEventKind, KeyModifiers,
+        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent,
+        KeyEventKind, KeyModifiers,
     },
     execute,
 };
@@ -40,7 +42,7 @@ pub struct App {
     running: bool,
     event_stream: EventStream,
     selected: usize,
-    mails: Vec<String>,
+    mails: Vec<Mail>,
     workspace: Workspace,
 }
 
@@ -51,9 +53,27 @@ impl Default for App {
             event_stream: EventStream::new(),
             selected: 0,
             mails: vec![
-                "welcome to mailtui".into(),
-                "test mail".into(),
-                "hello from ratatui".into(),
+                Mail::new(
+                    "mail-1",
+                    "termail@example.com",
+                    "project update",
+                    "hey,\nthe new build is ready.\ncan you review it?",
+                    None,
+                ),
+                Mail::new(
+                    "mail-2",
+                    "tuna@tunakilic.com",
+                    "re: project update",
+                    "sure, i'll check it tonight.",
+                    Some("mail-1"),
+                ),
+                Mail::new(
+                    "mail-3",
+                    "github@github.com",
+                    "pull request merged",
+                    "your pull request #42 has been merged.",
+                    None,
+                ),
             ],
             workspace: Workspace::new(),
         }
@@ -65,10 +85,7 @@ impl App {
         Self::default()
     }
 
-    pub async fn run(
-        mut self,
-        mut terminal: DefaultTerminal,
-    ) -> color_eyre::Result<()> {
+    pub async fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
         self.running = true;
 
         while self.running {
@@ -82,10 +99,7 @@ impl App {
     fn draw(&mut self, frame: &mut Frame) {
         let areas = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(35),
-                Constraint::Percentage(65),
-            ])
+            .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
             .split(frame.area());
 
         let items: Vec<ListItem> = self
@@ -94,18 +108,14 @@ impl App {
             .enumerate()
             .map(|(i, mail)| {
                 if i == self.selected {
-                    ListItem::new(format!("> {mail}")).bold()
+                    ListItem::new(format!("> {}", mail.subject)).bold()
                 } else {
-                    ListItem::new(format!("  {mail}"))
+                    ListItem::new(format!("  {}", mail.subject))
                 }
             })
             .collect();
 
-        let list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" inbox "),
-        );
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" inbox "));
 
         frame.render_widget(list, areas[0]);
 
@@ -135,10 +145,7 @@ impl App {
     fn on_key_event(&mut self, key: KeyEvent) {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc | KeyCode::Char('q'))
-            | (
-                KeyModifiers::CONTROL,
-                KeyCode::Char('c') | KeyCode::Char('C'),
-            ) => {
+            | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
                 self.running = false;
             }
 

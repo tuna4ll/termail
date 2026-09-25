@@ -18,7 +18,6 @@ impl Workspace {
                  the new build is ready.\n\
                  can you review it?",
             ),
-
             Node::from_text(
                 "mail-2",
                 (38.0, 8.0),
@@ -27,7 +26,6 @@ impl Workspace {
                  sure, i'll check it\n\
                  tonight.",
             ),
-
             Node::from_text(
                 "mail-3",
                 (70.0, 3.0),
