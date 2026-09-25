@@ -3,6 +3,10 @@ use crossterm::event::MouseEvent;
 use rataflow::{Edge, Flow, Node, StepEdge, TextContent};
 use ratatui::{Frame, layout::Rect};
 
+const CARD_WIDTH: usize = 42;
+const CARD_HEIGHT: usize = 10;
+const CARD_GAP: usize = 6;
+
 pub struct Workspace {
     flow: Flow<TextContent, StepEdge>,
 }
@@ -42,12 +46,10 @@ fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent
         .map(|(index, mail)| {
             Node::from_text(
                 &mail.id,
-                (4.0 + index as f64 * 52.0, 3.0),
-                format!(
-                    "from: {}\nsubject: {}\n\n{}",
-                    mail.from, mail.subject, mail.body
-                ),
+                (4.0 + index as f64 * (CARD_WIDTH + CARD_GAP) as f64, 3.0),
+                mail_preview(mail),
             )
+            .with_dimensions(CARD_WIDTH as f64, CARD_HEIGHT as f64)
         })
         .collect();
     let edges: Vec<Edge<StepEdge>> = conversation
@@ -62,6 +64,62 @@ fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent
         .collect();
 
     Flow::with_graph(nodes, edges).unwrap()
+}
+
+fn mail_preview(mail: &Mail) -> String {
+    let line_width = CARD_WIDTH - 2;
+    let from = clip_line(&format!("from: {}", mail.from), line_width);
+    let subject = clip_line(&format!("subject: {}", mail.subject), line_width);
+    let body = wrap_preview(&mail.body, line_width, CARD_HEIGHT - 5);
+
+    format!("{from}\n{subject}\n\n{body}")
+}
+
+fn clip_line(value: &str, width: usize) -> String {
+    if value.chars().count() <= width {
+        return value.into();
+    }
+
+    let mut clipped: String = value.chars().take(width - 1).collect();
+    clipped.push('…');
+    clipped
+}
+
+fn wrap_preview(value: &str, width: usize, max_lines: usize) -> String {
+    let words: Vec<&str> = value.split_whitespace().collect();
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut truncated = false;
+
+    for word in words {
+        if current.is_empty() {
+            current = clip_line(word, width);
+            truncated |= word.chars().count() > width;
+            continue;
+        }
+
+        let next_width = current.chars().count() + 1 + word.chars().count();
+        if next_width <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else if lines.len() + 1 < max_lines {
+            lines.push(current);
+            current = clip_line(word, width);
+            truncated |= word.chars().count() > width;
+        } else {
+            truncated = true;
+            break;
+        }
+    }
+
+    if !current.is_empty() && lines.len() < max_lines {
+        lines.push(current);
+    }
+    if truncated && let Some(last) = lines.last_mut() {
+        *last = clip_line(&format!("{last}…"), width);
+    }
+
+    lines.join("\n")
 }
 
 fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
