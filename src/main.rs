@@ -136,7 +136,11 @@ impl App {
                 }
 
                 Event::Mouse(mouse) => {
-                    self.workspace.handle_mouse(mouse);
+                    if self.reader.is_none()
+                        && let Some(mail_id) = self.workspace.handle_mouse(mouse)
+                    {
+                        self.open_mail(&mail_id);
+                    }
                 }
 
                 _ => {}
@@ -203,7 +207,7 @@ impl App {
             }
 
             (_, KeyCode::Enter) => {
-                self.reader = Some(Reader::new(self.mails[self.selected].id.clone()));
+                self.open_mail(&self.mails[self.selected].id.clone());
             }
 
             _ => {}
@@ -221,6 +225,13 @@ impl App {
         };
         if let Some(index) = self.mails.iter().position(|mail| mail.id == mail_id) {
             self.selected = index;
+        }
+    }
+
+    fn open_mail(&mut self, mail_id: &str) {
+        if let Some(index) = self.mails.iter().position(|mail| mail.id == mail_id) {
+            self.selected = index;
+            self.reader = Some(Reader::new(mail_id.into()));
         }
     }
 }

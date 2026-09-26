@@ -1,6 +1,6 @@
 use crate::mail::Mail;
 use crossterm::event::{KeyCode, MouseEvent};
-use rataflow::{Edge, Flow, Node, StepEdge, TextContent};
+use rataflow::{Edge, Flow, FlowEvent, Node, StepEdge, TextContent};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -39,8 +39,14 @@ impl Workspace {
         frame.render_widget(&mut self.flow, inner);
     }
 
-    pub fn handle_mouse(&mut self, mouse: MouseEvent) {
-        let _ = self.flow.handle_mouse_event(mouse);
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<String> {
+        self.flow
+            .handle_mouse_event(mouse)
+            .into_events()
+            .find_map(|event| match event {
+                FlowEvent::NodeClicked { node_id } => Some(node_id),
+                _ => None,
+            })
     }
 
     pub fn handle_key(&mut self, key: KeyCode) {
