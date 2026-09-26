@@ -185,7 +185,9 @@ fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
 
 #[cfg(test)]
 mod tests {
-    use super::{clip_line, wrap_preview};
+    use crate::mail::demo_mails;
+
+    use super::{clip_line, conversation_flow, wrap_preview};
 
     #[test]
     fn clips_long_lines() {
@@ -195,5 +197,13 @@ mod tests {
     #[test]
     fn wraps_and_marks_hidden_text() {
         assert_eq!(wrap_preview("one two three four", 7, 2), "one two\nthree…");
+    }
+
+    #[test]
+    fn places_selected_mail_at_the_leading_edge() {
+        let flow = conversation_flow(&demo_mails(), "project-2");
+
+        assert_eq!(flow.node("project-2").unwrap().position.x, 4.0);
+        assert!(flow.node("project-1").unwrap().position.x < 0.0);
     }
 }
