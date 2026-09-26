@@ -133,7 +133,9 @@ impl App {
 
         let hints = match self.focus {
             Pane::Inbox => " tab workspace • j/k select • enter read • q quit ",
-            Pane::Workspace => " tab inbox • arrows/hjkl select • enter read • q quit ",
+            Pane::Workspace => {
+                " tab inbox • arrows/hjkl select • enter read • f fit • +/- zoom • q quit "
+            }
         };
         frame.render_widget(Paragraph::new(hints), rows[1]);
 
@@ -218,7 +220,7 @@ impl App {
                 | KeyCode::Right
                 | KeyCode::Up
                 | KeyCode::Down
-                | KeyCode::Char('h' | 'j' | 'k' | 'l'),
+                | KeyCode::Char('h' | 'j' | 'k' | 'l' | '+' | '=' | '-' | '_' | '0' | 'f' | 'c'),
             ) if self.focus == Pane::Workspace => {
                 self.workspace.handle_key(key.code);
                 self.sync_inbox_selection();

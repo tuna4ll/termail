@@ -53,13 +53,19 @@ impl Workspace {
         match key {
             KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
                 self.flow.select_prev_node();
+                self.flow.center_on_selected();
             }
             KeyCode::Right | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('l') => {
                 self.flow.select_next_node();
+                self.flow.center_on_selected();
             }
-            _ => return,
+            KeyCode::Char('+' | '=') => self.flow.zoom_in(),
+            KeyCode::Char('-' | '_') => self.flow.zoom_out(),
+            KeyCode::Char('0') => self.flow.reset_zoom(),
+            KeyCode::Char('f') => self.flow.request_fit_view(),
+            KeyCode::Char('c') => self.flow.center_on_selected(),
+            _ => {}
         }
-        self.flow.center_on_selected();
     }
 
     pub fn selected_mail_id(&self) -> Option<String> {
