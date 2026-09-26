@@ -19,7 +19,7 @@ use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout},
     style::Stylize,
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
 #[tokio::main]
@@ -89,10 +89,14 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(frame.area());
         let areas = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(30), Constraint::Min(0)])
-            .split(frame.area());
+            .split(rows[0]);
 
         let items: Vec<ListItem> = self
             .mails
@@ -118,6 +122,12 @@ impl App {
 
         self.workspace
             .draw(frame, areas[1], self.focus == Pane::Workspace);
+
+        let hints = match self.focus {
+            Pane::Inbox => " tab workspace • j/k select • enter read • q quit ",
+            Pane::Workspace => " tab inbox • arrows/hjkl select • enter read • q quit ",
+        };
+        frame.render_widget(Paragraph::new(hints), rows[1]);
 
         if let Some(reader) = &mut self.reader
             && let Some(mail) = self.mails.iter().find(|mail| mail.id == reader.mail_id())
