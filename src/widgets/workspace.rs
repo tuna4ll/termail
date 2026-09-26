@@ -82,13 +82,18 @@ fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent
         .iter()
         .filter(|mail| root_id(mail, mails) == selected_root_id)
         .collect();
+    let selected_index = conversation
+        .iter()
+        .position(|mail| mail.id == selected_mail_id)
+        .unwrap_or_default();
     let nodes = conversation
         .iter()
         .enumerate()
         .map(|(index, mail)| {
+            let offset = index as isize - selected_index as isize;
             Node::from_text(
                 &mail.id,
-                (4.0 + index as f64 * (CARD_WIDTH + CARD_GAP) as f64, 3.0),
+                (4.0 + offset as f64 * (CARD_WIDTH + CARD_GAP) as f64, 3.0),
                 mail_preview(mail),
             )
             .with_dimensions(CARD_WIDTH as f64, CARD_HEIGHT as f64)
