@@ -1,5 +1,5 @@
 use crate::mail::Mail;
-use crossterm::event::MouseEvent;
+use crossterm::event::{KeyCode, MouseEvent};
 use rataflow::{Edge, Flow, Node, StepEdge, TextContent};
 use ratatui::{
     Frame,
@@ -41,6 +41,23 @@ impl Workspace {
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {
         let _ = self.flow.handle_mouse_event(mouse);
+    }
+
+    pub fn handle_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
+                self.flow.select_prev_node();
+            }
+            KeyCode::Right | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('l') => {
+                self.flow.select_next_node();
+            }
+            _ => return,
+        }
+        self.flow.center_on_selected();
+    }
+
+    pub fn selected_mail_id(&self) -> Option<String> {
+        self.flow.first_selected_node_id()
     }
 }
 

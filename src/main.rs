@@ -190,6 +190,18 @@ impl App {
                 self.sync_workspace();
             }
 
+            (
+                _,
+                KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Char('h' | 'j' | 'k' | 'l'),
+            ) if self.focus == Pane::Workspace => {
+                self.workspace.handle_key(key.code);
+                self.sync_inbox_selection();
+            }
+
             (_, KeyCode::Enter) => {
                 self.reader = Some(Reader::new(self.mails[self.selected].id.clone()));
             }
@@ -201,5 +213,14 @@ impl App {
     fn sync_workspace(&mut self) {
         self.workspace
             .show_conversation(&self.mails, &self.mails[self.selected].id);
+    }
+
+    fn sync_inbox_selection(&mut self) {
+        let Some(mail_id) = self.workspace.selected_mail_id() else {
+            return;
+        };
+        if let Some(index) = self.mails.iter().position(|mail| mail.id == mail_id) {
+            self.selected = index;
+        }
     }
 }
