@@ -1,7 +1,11 @@
 use crate::mail::Mail;
 use crossterm::event::MouseEvent;
 use rataflow::{Edge, Flow, Node, StepEdge, TextContent};
-use ratatui::{Frame, layout::Rect};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    widgets::{Block, Borders},
+};
 
 const CARD_WIDTH: usize = 42;
 const CARD_HEIGHT: usize = 10;
@@ -22,8 +26,17 @@ impl Workspace {
         self.flow = conversation_flow(mails, selected_mail_id);
     }
 
-    pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
-        frame.render_widget(&mut self.flow, area);
+    pub fn draw(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+        let title = if focused {
+            " workspace • active "
+        } else {
+            " workspace "
+        };
+        let block = Block::default().borders(Borders::ALL).title(title);
+        let inner = block.inner(area);
+
+        frame.render_widget(block, area);
+        frame.render_widget(&mut self.flow, inner);
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {

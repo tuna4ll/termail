@@ -46,6 +46,13 @@ pub struct App {
     mails: Vec<Mail>,
     workspace: Workspace,
     reader: Option<Reader>,
+    focus: Pane,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Pane {
+    Inbox,
+    Workspace,
 }
 
 impl Default for App {
@@ -60,6 +67,7 @@ impl Default for App {
             mails,
             workspace,
             reader: None,
+            focus: Pane::Inbox,
         }
     }
 }
@@ -99,11 +107,17 @@ impl App {
             })
             .collect();
 
-        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" inbox "));
+        let title = if self.focus == Pane::Inbox {
+            " inbox • active "
+        } else {
+            " inbox "
+        };
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
 
         frame.render_widget(list, areas[0]);
 
-        self.workspace.draw(frame, areas[1]);
+        self.workspace
+            .draw(frame, areas[1], self.focus == Pane::Workspace);
 
         if let Some(reader) = &mut self.reader
             && let Some(mail) = self.mails.iter().find(|mail| mail.id == reader.mail_id())
@@ -155,12 +169,23 @@ impl App {
                 self.running = false;
             }
 
-            (_, KeyCode::Down | KeyCode::Char('j')) if self.selected + 1 < self.mails.len() => {
+            (_, KeyCode::Tab) => {
+                self.focus = match self.focus {
+                    Pane::Inbox => Pane::Workspace,
+                    Pane::Workspace => Pane::Inbox,
+                };
+            }
+
+            (_, KeyCode::Down | KeyCode::Char('j'))
+                if self.focus == Pane::Inbox && self.selected + 1 < self.mails.len() =>
+            {
                 self.selected += 1;
                 self.sync_workspace();
             }
 
-            (_, KeyCode::Up | KeyCode::Char('k')) if self.selected > 0 => {
+            (_, KeyCode::Up | KeyCode::Char('k'))
+                if self.focus == Pane::Inbox && self.selected > 0 =>
+            {
                 self.selected -= 1;
                 self.sync_workspace();
             }
