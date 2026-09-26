@@ -22,6 +22,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
+const MIN_SPLIT_WIDTH: u16 = 78;
+
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
@@ -93,10 +95,6 @@ impl App {
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(1)])
             .split(frame.area());
-        let areas = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(30), Constraint::Min(0)])
-            .split(rows[0]);
 
         let items: Vec<ListItem> = self
             .mails
@@ -118,10 +116,20 @@ impl App {
         };
         let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
 
-        frame.render_widget(list, areas[0]);
-
-        self.workspace
-            .draw(frame, areas[1], self.focus == Pane::Workspace);
+        if rows[0].width < MIN_SPLIT_WIDTH {
+            match self.focus {
+                Pane::Inbox => frame.render_widget(list, rows[0]),
+                Pane::Workspace => self.workspace.draw(frame, rows[0], true),
+            }
+        } else {
+            let areas = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(30), Constraint::Min(0)])
+                .split(rows[0]);
+            frame.render_widget(list, areas[0]);
+            self.workspace
+                .draw(frame, areas[1], self.focus == Pane::Workspace);
+        }
 
         let hints = match self.focus {
             Pane::Inbox => " tab workspace • j/k select • enter read • q quit ",
