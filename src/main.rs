@@ -19,6 +19,7 @@ use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout},
     style::Stylize,
+    text::Line,
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
@@ -104,19 +105,21 @@ impl App {
             .iter()
             .enumerate()
             .map(|(i, conversation)| {
+                let last_sender = conversation.last_sender(&self.mails).unwrap_or("unknown");
+                let prefix = if i == self.selected { ">" } else { " " };
+                let item = ListItem::new(vec![
+                    Line::from(format!(
+                        "{prefix} {} ({})",
+                        conversation.subject,
+                        conversation.mail_ids.len()
+                    )),
+                    Line::from(format!("  last: {last_sender}")),
+                ]);
+
                 if i == self.selected {
-                    ListItem::new(format!(
-                        "> {} ({})",
-                        conversation.subject,
-                        conversation.mail_ids.len()
-                    ))
-                    .bold()
+                    item.bold()
                 } else {
-                    ListItem::new(format!(
-                        "  {} ({})",
-                        conversation.subject,
-                        conversation.mail_ids.len()
-                    ))
+                    item
                 }
             })
             .collect();

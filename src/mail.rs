@@ -24,6 +24,14 @@ impl Conversation {
             mail_ids: Vec::new(),
         }
     }
+
+    pub fn last_sender<'a>(&self, mails: &'a [Mail]) -> Option<&'a str> {
+        let mail_id = self.mail_ids.last()?;
+        mails
+            .iter()
+            .find(|mail| mail.id == *mail_id)
+            .map(|mail| mail.from.as_str())
+    }
 }
 
 pub fn group_conversations(mails: &[Mail]) -> Vec<Conversation> {
