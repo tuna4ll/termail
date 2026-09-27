@@ -63,7 +63,12 @@ impl Default for App {
     fn default() -> Self {
         let mails = demo_mails();
         let conversations = group_conversations(&mails);
-        let workspace = Workspace::new(&mails, &conversations[0].root_id);
+        let workspace = Workspace::new(
+            &mails,
+            conversations[0]
+                .latest_mail_id()
+                .expect("conversation is empty"),
+        );
 
         Self {
             running: false,
@@ -242,7 +247,12 @@ impl App {
             }
 
             (_, KeyCode::Enter) => {
-                self.open_mail(&self.conversations[self.selected].root_id.clone());
+                if let Some(mail_id) = self.conversations[self.selected]
+                    .latest_mail_id()
+                    .map(str::to_owned)
+                {
+                    self.open_mail(&mail_id);
+                }
             }
 
             _ => {}
@@ -250,8 +260,10 @@ impl App {
     }
 
     fn sync_workspace(&mut self) {
-        self.workspace
-            .show_conversation(&self.mails, &self.conversations[self.selected].root_id);
+        let Some(mail_id) = self.conversations[self.selected].latest_mail_id() else {
+            return;
+        };
+        self.workspace.show_conversation(&self.mails, mail_id);
     }
 
     fn sync_inbox_selection(&mut self) {

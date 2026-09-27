@@ -26,11 +26,15 @@ impl Conversation {
     }
 
     pub fn last_sender<'a>(&self, mails: &'a [Mail]) -> Option<&'a str> {
-        let mail_id = self.mail_ids.last()?;
+        let mail_id = self.latest_mail_id()?;
         mails
             .iter()
-            .find(|mail| mail.id == *mail_id)
+            .find(|mail| mail.id == mail_id)
             .map(|mail| mail.from.as_str())
+    }
+
+    pub fn latest_mail_id(&self) -> Option<&str> {
+        self.mail_ids.last().map(String::as_str)
     }
 }
 
