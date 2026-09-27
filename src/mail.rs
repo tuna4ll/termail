@@ -148,7 +148,8 @@ mod tests {
 
     #[test]
     fn groups_replies_with_their_root_mail() {
-        let conversations = group_conversations(&demo_mails());
+        let mails = demo_mails();
+        let conversations = group_conversations(&mails);
 
         assert_eq!(conversations.len(), 3);
         assert_eq!(conversations[0].root_id, "project-1");
@@ -156,6 +157,11 @@ mod tests {
         assert_eq!(
             conversations[0].mail_ids,
             ["project-1", "project-2", "project-3"]
+        );
+        assert_eq!(conversations[0].latest_mail_id(), Some("project-3"));
+        assert_eq!(
+            conversations[0].last_sender(&mails),
+            Some("ada@example.com")
         );
     }
 
