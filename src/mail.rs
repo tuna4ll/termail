@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mail {
     pub id: String,
@@ -5,6 +7,61 @@ pub struct Mail {
     pub subject: String,
     pub body: String,
     pub reply_to: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Conversation {
+    pub root_id: String,
+    pub subject: String,
+    pub mail_ids: Vec<String>,
+}
+
+impl Conversation {
+    pub fn new(root_id: &str, subject: &str) -> Self {
+        Self {
+            root_id: root_id.into(),
+            subject: subject.into(),
+            mail_ids: Vec::new(),
+        }
+    }
+}
+
+pub fn group_conversations(mails: &[Mail]) -> Vec<Conversation> {
+    let mut conversations = Vec::new();
+
+    for mail in mails {
+        let root = root_mail(mail, mails);
+        let index = conversations
+            .iter()
+            .position(|conversation: &Conversation| conversation.root_id == root.id);
+        let conversation = match index {
+            Some(index) => &mut conversations[index],
+            None => {
+                conversations.push(Conversation::new(&root.id, &root.subject));
+                conversations.last_mut().unwrap()
+            }
+        };
+        conversation.mail_ids.push(mail.id.clone());
+    }
+
+    conversations
+}
+
+fn root_mail<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a Mail {
+    let mut current = mail;
+    let mut visited = HashSet::new();
+
+    while visited.insert(current.id.as_str()) {
+        let Some(parent_id) = &current.reply_to else {
+            return current;
+        };
+        let Some(parent) = mails.iter().find(|mail| mail.id == *parent_id) else {
+            return current;
+        };
+        current = parent;
+    }
+
+    mail
 }
 
 impl Mail {

@@ -1,7 +1,7 @@
 mod mail;
 mod widgets;
 
-use mail::{Mail, demo_mails};
+use mail::{Conversation, Mail, demo_mails, group_conversations};
 use widgets::reader::Reader;
 use widgets::workspace::Workspace;
 
@@ -46,6 +46,7 @@ pub struct App {
     event_stream: EventStream,
     selected: usize,
     mails: Vec<Mail>,
+    conversations: Vec<Conversation>,
     workspace: Workspace,
     reader: Option<Reader>,
     focus: Pane,
@@ -60,13 +61,15 @@ enum Pane {
 impl Default for App {
     fn default() -> Self {
         let mails = demo_mails();
-        let workspace = Workspace::new(&mails, &mails[0].id);
+        let conversations = group_conversations(&mails);
+        let workspace = Workspace::new(&mails, &conversations[0].root_id);
 
         Self {
             running: false,
             event_stream: EventStream::new(),
             selected: 0,
             mails,
+            conversations,
             workspace,
             reader: None,
             focus: Pane::Inbox,
@@ -97,14 +100,14 @@ impl App {
             .split(frame.area());
 
         let items: Vec<ListItem> = self
-            .mails
+            .conversations
             .iter()
             .enumerate()
-            .map(|(i, mail)| {
+            .map(|(i, conversation)| {
                 if i == self.selected {
-                    ListItem::new(format!("> {}", mail.subject)).bold()
+                    ListItem::new(format!("> {}", conversation.subject)).bold()
                 } else {
-                    ListItem::new(format!("  {}", mail.subject))
+                    ListItem::new(format!("  {}", conversation.subject))
                 }
             })
             .collect();
@@ -201,7 +204,7 @@ impl App {
             }
 
             (_, KeyCode::Down | KeyCode::Char('j'))
-                if self.focus == Pane::Inbox && self.selected + 1 < self.mails.len() =>
+                if self.focus == Pane::Inbox && self.selected + 1 < self.conversations.len() =>
             {
                 self.selected += 1;
                 self.sync_workspace();
@@ -227,7 +230,7 @@ impl App {
             }
 
             (_, KeyCode::Enter) => {
-                self.open_mail(&self.mails[self.selected].id.clone());
+                self.open_mail(&self.conversations[self.selected].root_id.clone());
             }
 
             _ => {}
@@ -236,20 +239,28 @@ impl App {
 
     fn sync_workspace(&mut self) {
         self.workspace
-            .show_conversation(&self.mails, &self.mails[self.selected].id);
+            .show_conversation(&self.mails, &self.conversations[self.selected].root_id);
     }
 
     fn sync_inbox_selection(&mut self) {
         let Some(mail_id) = self.workspace.selected_mail_id() else {
             return;
         };
-        if let Some(index) = self.mails.iter().position(|mail| mail.id == mail_id) {
+        if let Some(index) = self
+            .conversations
+            .iter()
+            .position(|conversation| conversation.mail_ids.iter().any(|id| id == &mail_id))
+        {
             self.selected = index;
         }
     }
 
     fn open_mail(&mut self, mail_id: &str) {
-        if let Some(index) = self.mails.iter().position(|mail| mail.id == mail_id) {
+        if let Some(index) = self
+            .conversations
+            .iter()
+            .position(|conversation| conversation.mail_ids.iter().any(|id| id == mail_id))
+        {
             self.selected = index;
             self.reader = Some(Reader::new(mail_id.into()));
         }
