@@ -105,9 +105,18 @@ impl App {
             .enumerate()
             .map(|(i, conversation)| {
                 if i == self.selected {
-                    ListItem::new(format!("> {}", conversation.subject)).bold()
+                    ListItem::new(format!(
+                        "> {} ({})",
+                        conversation.subject,
+                        conversation.mail_ids.len()
+                    ))
+                    .bold()
                 } else {
-                    ListItem::new(format!("  {}", conversation.subject))
+                    ListItem::new(format!(
+                        "  {} ({})",
+                        conversation.subject,
+                        conversation.mail_ids.len()
+                    ))
                 }
             })
             .collect();
