@@ -129,3 +129,35 @@ pub fn demo_mails() -> Vec<Mail> {
         ),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Mail, demo_mails, group_conversations};
+
+    #[test]
+    fn groups_replies_with_their_root_mail() {
+        let conversations = group_conversations(&demo_mails());
+
+        assert_eq!(conversations.len(), 3);
+        assert_eq!(conversations[0].root_id, "project-1");
+        assert_eq!(conversations[0].subject, "project update");
+        assert_eq!(
+            conversations[0].mail_ids,
+            ["project-1", "project-2", "project-3"]
+        );
+    }
+
+    #[test]
+    fn keeps_orphan_replies_in_their_own_conversation() {
+        let mails = vec![Mail::new(
+            "orphan",
+            "ada@example.com",
+            "missing parent",
+            "hello",
+            Some("missing"),
+        )];
+        let conversations = group_conversations(&mails);
+
+        assert_eq!(conversations[0].root_id, "orphan");
+    }
+}
