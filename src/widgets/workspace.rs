@@ -1,4 +1,4 @@
-use crate::mail::Mail;
+use crate::{mail::Mail, theme};
 use crossterm::event::{KeyCode, MouseEvent};
 use rataflow::{Edge, Flow, FlowEvent, Node, StepEdge, TextContent};
 use ratatui::{
@@ -32,7 +32,11 @@ impl Workspace {
         } else {
             " workspace "
         };
-        let block = Block::default().borders(Borders::ALL).title(title);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme::border(focused))
+            .title_style(theme::title(focused))
+            .title(title);
         let inner = block.inner(area);
 
         frame.render_widget(block, area);
@@ -111,7 +115,9 @@ fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent
         })
         .collect();
 
-    Flow::with_graph(nodes, edges).unwrap()
+    Flow::with_graph(nodes, edges)
+        .unwrap()
+        .with_theme(theme::flow())
 }
 
 fn mail_preview(mail: &Mail) -> String {

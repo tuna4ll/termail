@@ -1,4 +1,5 @@
 mod mail;
+mod theme;
 mod widgets;
 
 use mail::{Conversation, Mail, demo_mails, group_conversations};
@@ -134,7 +135,13 @@ impl App {
         } else {
             " inbox "
         };
-        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
+        let list = List::new(items).style(theme::text()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme::border(self.focus == Pane::Inbox))
+                .title_style(theme::title(self.focus == Pane::Inbox))
+                .title(title),
+        );
 
         if rows[0].width < MIN_SPLIT_WIDTH {
             match self.focus {
@@ -157,7 +164,7 @@ impl App {
                 " tab inbox • arrows/hjkl select • enter read • f fit • +/- zoom • q quit "
             }
         };
-        frame.render_widget(Paragraph::new(hints), rows[1]);
+        frame.render_widget(Paragraph::new(hints).style(theme::muted()), rows[1]);
 
         if let Some(reader) = &mut self.reader
             && let Some(mail) = self.mails.iter().find(|mail| mail.id == reader.mail_id())

@@ -1,4 +1,4 @@
-use crate::mail::Mail;
+use crate::{mail::Mail, theme};
 use ratatui::{
     Frame,
     layout::{Margin, Rect},
@@ -42,9 +42,13 @@ impl Reader {
         );
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_style(theme::border(true))
+            .title_style(theme::title(true))
             .title(" message ")
             .title_bottom(" j/k scroll • esc close ");
-        let reader = Paragraph::new(content.as_str()).wrap(Wrap { trim: false });
+        let reader = Paragraph::new(content.as_str())
+            .style(theme::text())
+            .wrap(Wrap { trim: false });
         let viewport_height = area.height.saturating_sub(2) as usize;
         let content_height = wrapped_line_count(&content, area.width.saturating_sub(2));
         self.max_scroll = content_height.saturating_sub(viewport_height) as u16;
