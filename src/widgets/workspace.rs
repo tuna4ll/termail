@@ -1,18 +1,18 @@
-use crate::{mail::Mail, theme};
+use crate::{mail::Mail, theme, widgets::mail_card::MailCard};
 use crossterm::event::{KeyCode, MouseEvent};
-use rataflow::{Edge, Flow, FlowEvent, Node, StepEdge, TextContent};
+use rataflow::{Edge, Flow, FlowEvent, Node, StepEdge};
 use ratatui::{
     Frame,
     layout::Rect,
     widgets::{Block, Borders},
 };
 
-const CARD_WIDTH: usize = 42;
-const CARD_HEIGHT: usize = 10;
-const CARD_GAP: usize = 6;
+const CARD_WIDTH: usize = 40;
+const CARD_HEIGHT: usize = 9;
+const CARD_GAP: usize = 4;
 
 pub struct Workspace {
-    flow: Flow<TextContent, StepEdge>,
+    flow: Flow<MailCard, StepEdge>,
 }
 
 impl Workspace {
@@ -77,7 +77,7 @@ impl Workspace {
     }
 }
 
-fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent, StepEdge> {
+fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<MailCard, StepEdge> {
     let Some(selected) = mails.iter().find(|mail| mail.id == selected_mail_id) else {
         return Flow::new();
     };
@@ -95,12 +95,12 @@ fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent
         .enumerate()
         .map(|(index, mail)| {
             let offset = index as isize - selected_index as isize;
-            Node::from_text(
+            Node::new(
                 &mail.id,
                 (4.0 + offset as f64 * (CARD_WIDTH + CARD_GAP) as f64, 3.0),
-                mail_preview(mail),
+                (CARD_WIDTH as f64, CARD_HEIGHT as f64),
+                MailCard::new(mail, index + 1, conversation.len()),
             )
-            .with_dimensions(CARD_WIDTH as f64, CARD_HEIGHT as f64)
             .with_selected(mail.id == selected_mail_id)
         })
         .collect();
@@ -120,62 +120,6 @@ fn conversation_flow(mails: &[Mail], selected_mail_id: &str) -> Flow<TextContent
         .with_theme(theme::flow())
 }
 
-fn mail_preview(mail: &Mail) -> String {
-    let line_width = CARD_WIDTH - 2;
-    let from = clip_line(&format!("from: {}", mail.from), line_width);
-    let subject = clip_line(&format!("subject: {}", mail.subject), line_width);
-    let body = wrap_preview(&mail.body, line_width, CARD_HEIGHT - 5);
-
-    format!("{from}\n{subject}\n\n{body}")
-}
-
-fn clip_line(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.into();
-    }
-
-    let mut clipped: String = value.chars().take(width - 1).collect();
-    clipped.push('…');
-    clipped
-}
-
-fn wrap_preview(value: &str, width: usize, max_lines: usize) -> String {
-    let words: Vec<&str> = value.split_whitespace().collect();
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    let mut truncated = false;
-
-    for word in words {
-        if current.is_empty() {
-            current = clip_line(word, width);
-            truncated |= word.chars().count() > width;
-            continue;
-        }
-
-        let next_width = current.chars().count() + 1 + word.chars().count();
-        if next_width <= width {
-            current.push(' ');
-            current.push_str(word);
-        } else if lines.len() + 1 < max_lines {
-            lines.push(current);
-            current = clip_line(word, width);
-            truncated |= word.chars().count() > width;
-        } else {
-            truncated = true;
-            break;
-        }
-    }
-
-    if !current.is_empty() && lines.len() < max_lines {
-        lines.push(current);
-    }
-    if truncated && let Some(last) = lines.last_mut() {
-        *last = clip_line(&format!("{last}…"), width);
-    }
-
-    lines.join("\n")
-}
-
 fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
     let mut current = mail;
 
@@ -193,17 +137,7 @@ fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
 mod tests {
     use crate::mail::demo_mails;
 
-    use super::{clip_line, conversation_flow, wrap_preview};
-
-    #[test]
-    fn clips_long_lines() {
-        assert_eq!(clip_line("123456", 5), "1234…");
-    }
-
-    #[test]
-    fn wraps_and_marks_hidden_text() {
-        assert_eq!(wrap_preview("one two three four", 7, 2), "one two\nthree…");
-    }
+    use super::conversation_flow;
 
     #[test]
     fn places_selected_mail_at_the_leading_edge() {
