@@ -2,6 +2,8 @@ use crate::{mail::Mail, theme};
 use ratatui::{
     Frame,
     layout::{Margin, Rect},
+    style::{Modifier, Style, Stylize},
+    text::{Line, Span, Text},
     widgets::{
         Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
     },
@@ -36,17 +38,27 @@ impl Reader {
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect, mail: &Mail) {
         let area = reader_area(area);
+        self.render(frame, area, mail, true);
+    }
+
+    pub fn draw_docked(&mut self, frame: &mut Frame, area: Rect, mail: &Mail) {
+        self.render(frame, area, mail, false);
+    }
+
+    fn render(&mut self, frame: &mut Frame, area: Rect, mail: &Mail, clear: bool) {
         let content = format!(
             "from: {}\nsubject: {}\n\n{}",
             mail.from, mail.subject, mail.body
         );
+        let text = message_text(mail);
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(theme::border(true))
             .title_style(theme::title(true))
             .title(" message ")
-            .title_bottom(" j/k scroll • esc close ");
-        let reader = Paragraph::new(content.as_str())
+            .title_bottom(Line::styled(" j/k scroll • esc close ", theme::muted()))
+            .bg(theme::SURFACE);
+        let reader = Paragraph::new(text)
             .style(theme::text())
             .wrap(Wrap { trim: false });
         let viewport_height = area.height.saturating_sub(2) as usize;
@@ -55,7 +67,9 @@ impl Reader {
         self.scroll = self.scroll.min(self.max_scroll);
         let reader = reader.block(block).scroll((self.scroll, 0));
 
-        frame.render_widget(Clear, area);
+        if clear {
+            frame.render_widget(Clear, area);
+        }
         frame.render_widget(reader, area);
 
         if self.max_scroll > 0 {
@@ -75,6 +89,32 @@ impl Reader {
             );
         }
     }
+}
+
+fn message_text(mail: &Mail) -> Text<'_> {
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("from     ", theme::muted()),
+            Span::styled(
+                mail.from.as_str(),
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("subject  ", theme::muted()),
+            Span::styled(
+                mail.subject.as_str(),
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::default(),
+    ];
+    lines.extend(mail.body.lines().map(Line::from));
+    Text::from(lines)
 }
 
 fn wrapped_line_count(value: &str, width: u16) -> usize {

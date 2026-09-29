@@ -25,6 +25,9 @@ use ratatui::{
 };
 
 const MIN_SPLIT_WIDTH: u16 = 78;
+const MIN_DOCK_WIDTH: u16 = 112;
+const INBOX_WIDTH: u16 = 28;
+const READER_WIDTH: u16 = 44;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -130,7 +133,9 @@ impl App {
             })
             .collect();
 
-        let title = if self.focus == Pane::Inbox {
+        let inbox_focused = self.reader.is_none() && self.focus == Pane::Inbox;
+        let workspace_focused = self.reader.is_none() && self.focus == Pane::Workspace;
+        let title = if inbox_focused {
             " inbox • active "
         } else {
             " inbox "
@@ -138,24 +143,36 @@ impl App {
         let list = List::new(items).style(theme::text()).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(theme::border(self.focus == Pane::Inbox))
-                .title_style(theme::title(self.focus == Pane::Inbox))
+                .border_style(theme::border(inbox_focused))
+                .title_style(theme::title(inbox_focused))
                 .title(title),
         );
 
+        let mut docked_reader_area = None;
         if rows[0].width < MIN_SPLIT_WIDTH {
             match self.focus {
                 Pane::Inbox => frame.render_widget(list, rows[0]),
-                Pane::Workspace => self.workspace.draw(frame, rows[0], true),
+                Pane::Workspace => self.workspace.draw(frame, rows[0], workspace_focused),
             }
         } else {
+            let constraints = if self.reader.is_some() && rows[0].width >= MIN_DOCK_WIDTH {
+                vec![
+                    Constraint::Length(INBOX_WIDTH),
+                    Constraint::Min(0),
+                    Constraint::Length(READER_WIDTH),
+                ]
+            } else {
+                vec![Constraint::Length(30), Constraint::Min(0)]
+            };
             let areas = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(30), Constraint::Min(0)])
+                .constraints(constraints)
                 .split(rows[0]);
             frame.render_widget(list, areas[0]);
-            self.workspace
-                .draw(frame, areas[1], self.focus == Pane::Workspace);
+            self.workspace.draw(frame, areas[1], workspace_focused);
+            if areas.len() == 3 {
+                docked_reader_area = Some(areas[2]);
+            }
         }
 
         let hints = match self.focus {
@@ -169,7 +186,11 @@ impl App {
         if let Some(reader) = &mut self.reader
             && let Some(mail) = self.mails.iter().find(|mail| mail.id == reader.mail_id())
         {
-            reader.draw(frame, frame.area(), mail);
+            if let Some(area) = docked_reader_area {
+                reader.draw_docked(frame, area, mail);
+            } else {
+                reader.draw(frame, frame.area(), mail);
+            }
         }
     }
 
