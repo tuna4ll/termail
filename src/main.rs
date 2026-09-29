@@ -253,11 +253,14 @@ impl App {
                 self.sync_inbox_selection();
             }
 
-            (_, KeyCode::Enter) => {
-                if let Some(mail_id) = self.conversations[self.selected]
-                    .latest_mail_id()
-                    .map(str::to_owned)
-                {
+            (_, KeyCode::Enter | KeyCode::Char(' ')) => {
+                let mail_id = match self.focus {
+                    Pane::Inbox => self.conversations[self.selected]
+                        .latest_mail_id()
+                        .map(str::to_owned),
+                    Pane::Workspace => self.workspace.selected_mail_id(),
+                };
+                if let Some(mail_id) = mail_id {
                     self.open_mail(&mail_id);
                 }
             }
