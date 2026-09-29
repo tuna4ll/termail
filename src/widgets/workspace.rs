@@ -1,8 +1,8 @@
 use crate::{mail::Mail, theme, widgets::mail_card::MailCard};
 use crossterm::event::{KeyCode, MouseEvent};
 use rataflow::{
-    Edge, FitViewOptions, Flow, FlowEvent, HandlePosition, Node, SelectionReveal, StepEdge,
-    Sugiyama,
+    Background, BackgroundVariant, Edge, FitViewOptions, Flow, FlowEvent, HandlePosition, Node,
+    SelectionReveal, StepEdge, Sugiyama,
 };
 use ratatui::{
     Frame,
@@ -67,6 +67,12 @@ impl Workspace {
         }
 
         frame.render_widget(block, area);
+        frame.render_widget(
+            Background::new(&self.flow)
+                .variant(BackgroundVariant::Dots)
+                .gap(6, 3),
+            inner,
+        );
         frame.render_widget(&mut self.flow, inner);
     }
 
