@@ -1,12 +1,15 @@
+use std::collections::HashSet;
+
 use crate::{mail::Mail, theme, widgets::mail_card::MailCard};
 use crossterm::event::{KeyCode, MouseEvent};
 use rataflow::{
-    Background, BackgroundVariant, Edge, FitViewOptions, Flow, FlowEvent, HandlePosition, MiniMap,
-    MiniMapPosition, Node, SelectionReveal, StepEdge, Sugiyama,
+    Background, BackgroundVariant, Edge, EdgeStyle, FitViewOptions, Flow, FlowEvent,
+    HandlePosition, MiniMap, MiniMapPosition, Node, SelectionReveal, StepEdge, Sugiyama,
 };
 use ratatui::{
     Frame,
     layout::Rect,
+    style::{Modifier, Style},
     widgets::{Block, Borders},
 };
 
@@ -90,13 +93,19 @@ impl Workspace {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<String> {
-        self.flow
-            .handle_mouse_event(mouse)
-            .into_events()
-            .find_map(|event| match event {
-                FlowEvent::NodeClicked { node_id } => Some(node_id),
-                _ => None,
-            })
+        let clicked =
+            self.flow
+                .handle_mouse_event(mouse)
+                .into_events()
+                .find_map(|event| match event {
+                    FlowEvent::NodeClicked { node_id } => Some(node_id),
+                    _ => None,
+                });
+        if let Some(mail_id) = &clicked {
+            self.selected_mail_id = mail_id.clone();
+            self.update_edge_styles();
+        }
+        clicked
     }
 
     pub fn handle_key(&mut self, key: KeyCode) {
@@ -116,6 +125,7 @@ impl Workspace {
         }
         if let Some(mail_id) = self.flow.first_selected_node_id() {
             self.selected_mail_id = mail_id;
+            self.update_edge_styles();
         }
     }
 
@@ -141,6 +151,14 @@ impl Workspace {
         bounds.width() * zoom > area.width.saturating_sub(4) as f64
             || bounds.height() * zoom > area.height.saturating_sub(4) as f64
     }
+
+    fn update_edge_styles(&mut self) {
+        let path = selected_path_ids(&self.mails, &self.selected_mail_id);
+        for (edge_id, content) in self.flow.edges_content_mut() {
+            let target_id = edge_id.strip_prefix("reply-").unwrap_or(edge_id);
+            content.style = Some(reply_style(path.contains(target_id)));
+        }
+    }
 }
 
 fn conversation_flow(
@@ -156,6 +174,7 @@ fn conversation_flow(
         .iter()
         .filter(|mail| root_id(mail, mails) == selected_root_id)
         .collect();
+    let selected_path = selected_path_ids(mails, selected_mail_id);
     let nodes = conversation
         .iter()
         .enumerate()
@@ -186,14 +205,19 @@ fn conversation_flow(
                 .any(|parent| parent.id == parent_id)
                 .then(|| {
                     let edge = Edge::new(format!("reply-{}", mail.id), parent_id, &mail.id);
-                    match layout {
+                    let edge = match layout {
                         FlowLayout::Horizontal => edge
                             .with_source_side(HandlePosition::Right)
                             .with_target_side(HandlePosition::Left),
                         FlowLayout::Vertical => edge
                             .with_source_side(HandlePosition::Bottom)
                             .with_target_side(HandlePosition::Top),
-                    }
+                    };
+                    edge.with_content(
+                        StepEdge::default()
+                            .with_stem_length(2.0)
+                            .with_style(reply_style(selected_path.contains(mail.id.as_str()))),
+                    )
                 })
         })
         .collect();
@@ -220,6 +244,31 @@ fn conversation_flow(
     flow
 }
 
+fn reply_style(active: bool) -> EdgeStyle {
+    let style = Style::default().fg(if active { theme::ACCENT } else { theme::MUTED });
+    let style = if active {
+        style.add_modifier(Modifier::BOLD)
+    } else {
+        style
+    };
+    EdgeStyle::default().with_stroke_style(style)
+}
+
+fn selected_path_ids<'a>(mails: &'a [Mail], selected_mail_id: &str) -> HashSet<&'a str> {
+    let mut ids = HashSet::new();
+    let mut current = mails.iter().find(|mail| mail.id == selected_mail_id);
+
+    while let Some(mail) = current {
+        ids.insert(mail.id.as_str());
+        current = mail
+            .reply_to
+            .as_deref()
+            .and_then(|parent_id| mails.iter().find(|candidate| candidate.id == parent_id));
+    }
+
+    ids
+}
+
 fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
     let mut current = mail;
 
@@ -237,7 +286,7 @@ fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
 mod tests {
     use crate::mail::demo_mails;
 
-    use super::{FlowLayout, conversation_flow};
+    use super::{FlowLayout, conversation_flow, selected_path_ids};
 
     #[test]
     fn lays_out_conversations_horizontally() {
@@ -256,5 +305,16 @@ mod tests {
         assert!(
             flow.node("project-1").unwrap().position.y < flow.node("project-2").unwrap().position.y
         );
+    }
+
+    #[test]
+    fn follows_the_selected_reply_path() {
+        let mails = demo_mails();
+        let path = selected_path_ids(&mails, "project-3");
+
+        assert_eq!(path.len(), 3);
+        assert!(path.contains("project-1"));
+        assert!(path.contains("project-3"));
+        assert!(!path.contains("weekend-1"));
     }
 }
