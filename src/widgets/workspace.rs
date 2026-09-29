@@ -1,8 +1,8 @@
 use crate::{mail::Mail, theme, widgets::mail_card::MailCard};
 use crossterm::event::{KeyCode, MouseEvent};
 use rataflow::{
-    Background, BackgroundVariant, Edge, FitViewOptions, Flow, FlowEvent, HandlePosition, Node,
-    SelectionReveal, StepEdge, Sugiyama,
+    Background, BackgroundVariant, Edge, FitViewOptions, Flow, FlowEvent, HandlePosition, MiniMap,
+    MiniMapPosition, Node, SelectionReveal, StepEdge, Sugiyama,
 };
 use ratatui::{
     Frame,
@@ -74,6 +74,19 @@ impl Workspace {
             inner,
         );
         frame.render_widget(&mut self.flow, inner);
+        if self.needs_minimap(inner) {
+            let map = MiniMap::new(&self.flow)
+                .position(MiniMapPosition::BottomRight)
+                .size(20, 7)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(theme::border(false))
+                        .title_style(theme::muted())
+                        .title(" map "),
+                );
+            frame.render_widget(map, inner);
+        }
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<String> {
@@ -108,6 +121,25 @@ impl Workspace {
 
     pub fn selected_mail_id(&self) -> Option<String> {
         self.flow.first_selected_node_id()
+    }
+
+    fn needs_minimap(&self, area: Rect) -> bool {
+        if area.width < 48 || area.height < 12 {
+            return false;
+        }
+
+        let bounds = self
+            .flow
+            .nodes()
+            .map(Node::bounds)
+            .reduce(|a, b| a.union(&b));
+        let Some(bounds) = bounds else {
+            return false;
+        };
+        let zoom = self.flow.viewport.zoom;
+
+        bounds.width() * zoom > area.width.saturating_sub(4) as f64
+            || bounds.height() * zoom > area.height.saturating_sub(4) as f64
     }
 }
 
