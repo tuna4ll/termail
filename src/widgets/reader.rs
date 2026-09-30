@@ -56,7 +56,6 @@ impl Reader {
             .border_style(theme::border(true))
             .title_style(theme::title(true))
             .title(" message ")
-            .title_bottom(Line::styled(" j/k scroll • esc close ", theme::muted()))
             .bg(theme::SURFACE);
         let reader = Paragraph::new(text)
             .style(theme::text())
