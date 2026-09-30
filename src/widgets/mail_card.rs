@@ -39,20 +39,30 @@ impl NodeContent for MailCard {
         } else {
             Style::default().fg(palette.muted)
         };
-        let marker = if ctx.selected { "● " } else { "  " };
-        let title = clip_line(
-            &format!("{marker}{}", self.subject),
-            ctx.area.width.saturating_sub(4) as usize,
-        );
-        let block = Block::bordered()
+        let mut block = Block::bordered()
             .border_type(BorderType::Rounded)
             .border_style(border)
-            .bg(palette.surface)
-            .title(Line::styled(title, border));
+            .bg(palette.surface);
+        if ctx.selected {
+            block = block.title(Line::styled(" ● selected ", border));
+        }
         let inner = block.inner(ctx.area);
         block.render(ctx.area, buf);
 
         if inner.height == 0 {
+            return;
+        }
+
+        let subject = clip_line(&self.subject, inner.width as usize);
+        Paragraph::new(subject)
+            .style(
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .render(Rect::new(inner.x, inner.y, inner.width, 1), buf);
+
+        if inner.height < 2 {
             return;
         }
 
@@ -65,18 +75,18 @@ impl NodeContent for MailCard {
                     .add_modifier(Modifier::BOLD),
             ),
         ]);
-        Paragraph::new(sender).render(Rect::new(inner.x, inner.y, inner.width, 1), buf);
+        Paragraph::new(sender).render(Rect::new(inner.x, inner.y + 1, inner.width, 1), buf);
 
-        if inner.height > 2 {
+        if inner.height > 3 {
             Paragraph::new(Text::from(self.body.as_str()))
                 .style(Style::default().fg(palette.text))
                 .wrap(Wrap { trim: false })
                 .render(
                     Rect::new(
                         inner.x,
-                        inner.y + 2,
+                        inner.y + 3,
                         inner.width,
-                        inner.height.saturating_sub(3),
+                        inner.height.saturating_sub(4),
                     ),
                     buf,
                 );
