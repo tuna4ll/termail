@@ -19,9 +19,8 @@ use futures::{FutureExt, StreamExt};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout},
-    style::Stylize,
     text::Line,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, HighlightSpacing, List, ListItem, ListState, Paragraph},
 };
 
 const MIN_SPLIT_WIDTH: u16 = 78;
@@ -112,24 +111,16 @@ impl App {
         let items: Vec<ListItem> = self
             .conversations
             .iter()
-            .enumerate()
-            .map(|(i, conversation)| {
+            .map(|conversation| {
                 let last_sender = conversation.last_sender(&self.mails).unwrap_or("unknown");
-                let prefix = if i == self.selected { ">" } else { " " };
-                let item = ListItem::new(vec![
+                ListItem::new(vec![
                     Line::from(format!(
-                        "{prefix} {} ({})",
+                        "{} · {}",
                         conversation.subject,
-                        conversation.mail_ids.len()
+                        message_count(conversation.mail_ids.len())
                     )),
-                    Line::from(format!("  last: {last_sender}")),
-                ]);
-
-                if i == self.selected {
-                    item.bold()
-                } else {
-                    item
-                }
+                    Line::styled(format!("from {last_sender}"), theme::muted()),
+                ])
             })
             .collect();
 
@@ -140,18 +131,25 @@ impl App {
         } else {
             " inbox "
         };
-        let list = List::new(items).style(theme::text()).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(theme::border(inbox_focused))
-                .title_style(theme::title(inbox_focused))
-                .title(title),
-        );
+        let list = List::new(items)
+            .style(theme::text())
+            .highlight_symbol("▌ ")
+            .highlight_style(theme::selection())
+            .highlight_spacing(HighlightSpacing::Always)
+            .repeat_highlight_symbol(true)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(theme::border(inbox_focused))
+                    .title_style(theme::title(inbox_focused))
+                    .title(title),
+            );
+        let mut list_state = ListState::default().with_selected(Some(self.selected));
 
         let mut docked_reader_area = None;
         if rows[0].width < MIN_SPLIT_WIDTH {
             match self.focus {
-                Pane::Inbox => frame.render_widget(list, rows[0]),
+                Pane::Inbox => frame.render_stateful_widget(list, rows[0], &mut list_state),
                 Pane::Workspace => self.workspace.draw(frame, rows[0], workspace_focused),
             }
         } else {
@@ -168,7 +166,7 @@ impl App {
                 .direction(Direction::Horizontal)
                 .constraints(constraints)
                 .split(rows[0]);
-            frame.render_widget(list, areas[0]);
+            frame.render_stateful_widget(list, areas[0], &mut list_state);
             self.workspace.draw(frame, areas[1], workspace_focused);
             if areas.len() == 3 {
                 docked_reader_area = Some(areas[2]);
@@ -319,5 +317,12 @@ impl App {
             self.selected = index;
             self.reader = Some(Reader::new(mail_id.into()));
         }
+    }
+}
+
+fn message_count(count: usize) -> String {
+    match count {
+        1 => "1 message".into(),
+        count => format!("{count} messages"),
     }
 }

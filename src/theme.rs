@@ -41,3 +41,10 @@ pub fn text() -> Style {
 pub fn muted() -> Style {
     Style::default().fg(MUTED)
 }
+
+pub fn selection() -> Style {
+    Style::default()
+        .fg(TEXT)
+        .bg(SUBTLE)
+        .add_modifier(Modifier::BOLD)
+}
