@@ -164,6 +164,9 @@ fn reader_area(area: Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
+    use crate::mail::demo_mails;
+    use ratatui::{Terminal, backend::TestBackend};
+
     use super::{Reader, wrapped_line_count};
 
     #[test]
@@ -181,5 +184,28 @@ mod tests {
         assert_eq!(reader.scroll, 3);
         reader.scroll_up(2);
         assert_eq!(reader.scroll, 1);
+    }
+
+    #[test]
+    fn renders_docked_message_content() {
+        let mut reader = Reader::new("project-1".into());
+        let mail = &demo_mails()[0];
+        let backend = TestBackend::new(44, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| reader.draw_docked(frame, frame.area(), mail))
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(screen.contains("message"));
+        assert!(screen.contains("ada@example.com"));
+        assert!(screen.contains("the new build is ready"));
     }
 }

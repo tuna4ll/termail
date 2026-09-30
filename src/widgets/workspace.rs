@@ -285,8 +285,9 @@ fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
 #[cfg(test)]
 mod tests {
     use crate::mail::demo_mails;
+    use ratatui::{Terminal, backend::TestBackend};
 
-    use super::{FlowLayout, conversation_flow, selected_path_ids};
+    use super::{FlowLayout, Workspace, conversation_flow, selected_path_ids};
 
     #[test]
     fn lays_out_conversations_horizontally() {
@@ -316,5 +317,32 @@ mod tests {
         assert!(path.contains("project-1"));
         assert!(path.contains("project-3"));
         assert!(!path.contains("weekend-1"));
+    }
+
+    #[test]
+    fn renders_mail_card_hierarchy() {
+        let mails = demo_mails();
+        let mut workspace = Workspace::new(&mails, "project-3");
+        let backend = TestBackend::new(90, 28);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| workspace.draw(frame, frame.area(), true))
+            .unwrap();
+        terminal
+            .draw(|frame| workspace.draw(frame, frame.area(), true))
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(screen.contains("workspace"));
+        assert!(screen.contains("project update"), "{screen}");
+        assert!(screen.contains("ada@example.com"));
+        assert!(screen.contains("↵ open"));
     }
 }

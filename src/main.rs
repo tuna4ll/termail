@@ -153,7 +153,7 @@ impl App {
                 Pane::Workspace => self.workspace.draw(frame, rows[0], workspace_focused),
             }
         } else {
-            let constraints = if self.reader.is_some() && rows[0].width >= MIN_DOCK_WIDTH {
+            let constraints = if reader_is_docked(rows[0].width, self.reader.is_some()) {
                 vec![
                     Constraint::Length(INBOX_WIDTH),
                     Constraint::Min(0),
@@ -351,4 +351,20 @@ fn status_line(hints: &[(&str, &str)]) -> Line<'static> {
         spans.push(Span::styled(format!(" {label}"), theme::muted()));
     }
     Line::from(spans)
+}
+
+fn reader_is_docked(width: u16, reader_open: bool) -> bool {
+    reader_open && width >= MIN_DOCK_WIDTH
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reader_is_docked;
+
+    #[test]
+    fn docks_readers_only_when_they_fit() {
+        assert!(reader_is_docked(120, true));
+        assert!(!reader_is_docked(100, true));
+        assert!(!reader_is_docked(120, false));
+    }
 }
