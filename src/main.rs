@@ -117,7 +117,7 @@ impl App {
                     Line::from(format!(
                         "{} · {}",
                         conversation.subject,
-                        message_count(conversation.mail_ids.len())
+                        conversation.mail_ids.len()
                     )),
                     Line::styled(format!("from {last_sender}"), theme::muted()),
                 ])
@@ -331,13 +331,6 @@ impl App {
             self.selected = index;
             self.reader = Some(Reader::new(mail_id.into()));
         }
-    }
-}
-
-fn message_count(count: usize) -> String {
-    match count {
-        1 => "1 message".into(),
-        count => format!("{count} messages"),
     }
 }
 
