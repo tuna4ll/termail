@@ -48,3 +48,10 @@ pub fn selection() -> Style {
         .bg(SUBTLE)
         .add_modifier(Modifier::BOLD)
 }
+
+pub fn keycap() -> Style {
+    Style::default()
+        .fg(TEXT)
+        .bg(SUBTLE)
+        .add_modifier(Modifier::BOLD)
+}

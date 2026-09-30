@@ -19,7 +19,7 @@ use futures::{FutureExt, StreamExt};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, HighlightSpacing, List, ListItem, ListState, Paragraph},
 };
 
@@ -173,13 +173,27 @@ impl App {
             }
         }
 
-        let hints = match self.focus {
-            Pane::Inbox => " tab workspace • j/k select • enter read • q quit ",
-            Pane::Workspace => {
-                " tab inbox • arrows/hjkl select • enter read • f fit • +/- zoom • q quit "
+        let hints = if self.reader.is_some() {
+            status_line(&[("j/k", "scroll"), ("pgup/pgdn", "page"), ("esc", "close")])
+        } else {
+            match self.focus {
+                Pane::Inbox => status_line(&[
+                    ("tab", "thread map"),
+                    ("j/k", "select"),
+                    ("enter", "open"),
+                    ("q", "quit"),
+                ]),
+                Pane::Workspace => status_line(&[
+                    ("tab", "inbox"),
+                    ("arrows", "select"),
+                    ("enter", "open"),
+                    ("f", "fit"),
+                    ("+/-", "zoom"),
+                    ("q", "quit"),
+                ]),
             }
         };
-        frame.render_widget(Paragraph::new(hints).style(theme::muted()), rows[1]);
+        frame.render_widget(Paragraph::new(hints), rows[1]);
 
         if let Some(reader) = &mut self.reader
             && let Some(mail) = self.mails.iter().find(|mail| mail.id == reader.mail_id())
@@ -325,4 +339,16 @@ fn message_count(count: usize) -> String {
         1 => "1 message".into(),
         count => format!("{count} messages"),
     }
+}
+
+fn status_line(hints: &[(&str, &str)]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (index, (key, label)) in hints.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("  "));
+        }
+        spans.push(Span::styled(format!(" {key} "), theme::keycap()));
+        spans.push(Span::styled(format!(" {label}"), theme::muted()));
+    }
+    Line::from(spans)
 }
