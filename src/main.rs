@@ -1,4 +1,5 @@
 mod mail;
+mod mailbox;
 mod theme;
 mod widgets;
 
