@@ -100,16 +100,33 @@ fn root_mail<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a Mail {
     let mut visited = HashSet::new();
 
     while visited.insert(current.id.as_str()) {
-        let Some(parent_id) = &current.reply_to else {
+        let Some(parent_id) = parent_id(current, mails) else {
             return current;
         };
-        let Some(parent) = mails.iter().find(|mail| mail.id == *parent_id) else {
+        let Some(parent) = mails.iter().find(|mail| mail.id == parent_id) else {
             return current;
         };
         current = parent;
     }
 
     mail
+}
+
+pub fn parent_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> Option<&'a str> {
+    mail.reply_to
+        .as_deref()
+        .filter(|id| mails.iter().any(|candidate| candidate.id == *id))
+        .or_else(|| {
+            mail.references
+                .iter()
+                .rev()
+                .find(|id| mails.iter().any(|candidate| candidate.id == id.as_str()))
+                .map(String::as_str)
+        })
+}
+
+pub fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
+    root_mail(mail, mails).id.as_str()
 }
 
 impl Mail {
@@ -258,5 +275,18 @@ mod tests {
         let conversations = group_conversations(&mails);
 
         assert_eq!(conversations[0].root_id, "orphan");
+    }
+
+    #[test]
+    fn uses_references_when_reply_to_is_missing() {
+        let root = Mail::new("root", "ada@example.com", "update", "hello", None);
+        let first = Mail::new("first", "tuna@example.com", "re: update", "hi", Some("root"));
+        let second = Mail::new("second", "mert@example.com", "re: update", "hey", None)
+            .with_references(&["root"]);
+        let mails = vec![root, first, second];
+        let conversations = group_conversations(&mails);
+
+        assert_eq!(conversations.len(), 1);
+        assert_eq!(conversations[0].mail_ids, ["root", "first", "second"]);
     }
 }
