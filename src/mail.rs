@@ -4,9 +4,17 @@ use std::collections::HashSet;
 pub struct Mail {
     pub id: String,
     pub from: String,
+    pub to: Vec<String>,
+    pub cc: Vec<String>,
     pub subject: String,
     pub body: String,
+    pub date: Option<String>,
+    pub timestamp: Option<i64>,
     pub reply_to: Option<String>,
+    pub references: Vec<String>,
+    pub unread: bool,
+    pub starred: bool,
+    pub attachment_count: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,6 +43,34 @@ impl Conversation {
 
     pub fn latest_mail_id(&self) -> Option<&str> {
         self.mail_ids.last().map(String::as_str)
+    }
+
+    pub fn is_unread(&self, mails: &[Mail]) -> bool {
+        self.mail_ids.iter().any(|id| {
+            mails
+                .iter()
+                .find(|mail| &mail.id == id)
+                .is_some_and(|mail| mail.unread)
+        })
+    }
+
+    pub fn is_starred(&self, mails: &[Mail]) -> bool {
+        self.mail_ids.iter().any(|id| {
+            mails
+                .iter()
+                .find(|mail| &mail.id == id)
+                .is_some_and(|mail| mail.starred)
+        })
+    }
+
+    pub fn matches(&self, mails: &[Mail], query: &str) -> bool {
+        let query = query.to_lowercase();
+        self.mail_ids.iter().any(|id| {
+            mails
+                .iter()
+                .find(|mail| &mail.id == id)
+                .is_some_and(|mail| mail.matches(&query))
+        })
     }
 }
 
@@ -81,10 +117,55 @@ impl Mail {
         Self {
             id: id.into(),
             from: from.into(),
+            to: Vec::new(),
+            cc: Vec::new(),
             subject: subject.into(),
             body: body.into(),
+            date: None,
+            timestamp: None,
             reply_to: reply_to.map(Into::into),
+            references: Vec::new(),
+            unread: false,
+            starred: false,
+            attachment_count: 0,
         }
+    }
+
+    pub fn with_recipients(mut self, to: &[&str], cc: &[&str]) -> Self {
+        self.to = to.iter().map(|value| (*value).into()).collect();
+        self.cc = cc.iter().map(|value| (*value).into()).collect();
+        self
+    }
+
+    pub fn with_date(mut self, date: &str, timestamp: i64) -> Self {
+        self.date = Some(date.into());
+        self.timestamp = Some(timestamp);
+        self
+    }
+
+    pub fn with_references(mut self, references: &[&str]) -> Self {
+        self.references = references.iter().map(|value| (*value).into()).collect();
+        self
+    }
+
+    pub fn with_state(mut self, unread: bool, starred: bool) -> Self {
+        self.unread = unread;
+        self.starred = starred;
+        self
+    }
+
+    pub fn with_attachments(mut self, count: usize) -> Self {
+        self.attachment_count = count;
+        self
+    }
+
+    pub fn matches(&self, query: &str) -> bool {
+        let query = query.to_lowercase();
+        self.subject.to_lowercase().contains(&query)
+            || self.from.to_lowercase().contains(&query)
+            || self.body.to_lowercase().contains(&query)
+            || self.to.iter().any(|value| value.to_lowercase().contains(&query))
+            || self.cc.iter().any(|value| value.to_lowercase().contains(&query))
     }
 }
 
