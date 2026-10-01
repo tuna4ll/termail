@@ -181,8 +181,14 @@ impl Mail {
         self.subject.to_lowercase().contains(&query)
             || self.from.to_lowercase().contains(&query)
             || self.body.to_lowercase().contains(&query)
-            || self.to.iter().any(|value| value.to_lowercase().contains(&query))
-            || self.cc.iter().any(|value| value.to_lowercase().contains(&query))
+            || self
+                .to
+                .iter()
+                .any(|value| value.to_lowercase().contains(&query))
+            || self
+                .cc
+                .iter()
+                .any(|value| value.to_lowercase().contains(&query))
     }
 }
 
@@ -280,7 +286,13 @@ mod tests {
     #[test]
     fn uses_references_when_reply_to_is_missing() {
         let root = Mail::new("root", "ada@example.com", "update", "hello", None);
-        let first = Mail::new("first", "tuna@example.com", "re: update", "hi", Some("root"));
+        let first = Mail::new(
+            "first",
+            "tuna@example.com",
+            "re: update",
+            "hi",
+            Some("root"),
+        );
         let second = Mail::new("second", "mert@example.com", "re: update", "hey", None)
             .with_references(&["root"]);
         let mails = vec![root, first, second];

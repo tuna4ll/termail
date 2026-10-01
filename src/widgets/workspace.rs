@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 
-use crate::{mail::Mail, theme, widgets::mail_card::MailCard};
+use crate::{
+    mail::{Mail, parent_id, root_id},
+    theme,
+    widgets::mail_card::MailCard,
+};
 use crossterm::event::{KeyCode, MouseEvent};
 use rataflow::{
     Background, BackgroundVariant, Edge, EdgeStyle, FitViewOptions, Flow, FlowEvent,
@@ -199,7 +203,7 @@ fn conversation_flow(
     let edges: Vec<Edge<StepEdge>> = conversation
         .iter()
         .filter_map(|mail| {
-            let parent_id = mail.reply_to.as_deref()?;
+            let parent_id = parent_id(mail, mails)?;
             conversation
                 .iter()
                 .any(|parent| parent.id == parent_id)
@@ -259,27 +263,14 @@ fn selected_path_ids<'a>(mails: &'a [Mail], selected_mail_id: &str) -> HashSet<&
     let mut current = mails.iter().find(|mail| mail.id == selected_mail_id);
 
     while let Some(mail) = current {
-        ids.insert(mail.id.as_str());
-        current = mail
-            .reply_to
-            .as_deref()
+        if !ids.insert(mail.id.as_str()) {
+            break;
+        }
+        current = parent_id(mail, mails)
             .and_then(|parent_id| mails.iter().find(|candidate| candidate.id == parent_id));
     }
 
     ids
-}
-
-fn root_id<'a>(mail: &'a Mail, mails: &'a [Mail]) -> &'a str {
-    let mut current = mail;
-
-    while let Some(parent_id) = &current.reply_to {
-        let Some(parent) = mails.iter().find(|mail| mail.id == *parent_id) else {
-            break;
-        };
-        current = parent;
-    }
-
-    &current.id
 }
 
 #[cfg(test)]
@@ -317,6 +308,25 @@ mod tests {
         assert!(path.contains("project-1"));
         assert!(path.contains("project-3"));
         assert!(!path.contains("weekend-1"));
+    }
+
+    #[test]
+    fn renders_reference_branches() {
+        let mut mails = demo_mails();
+        mails.push(
+            crate::mail::Mail::new(
+                "branch",
+                "mert@example.com",
+                "re: project update",
+                "ship it",
+                None,
+            )
+            .with_references(&["project-1"]),
+        );
+        let flow = conversation_flow(&mails, "branch", FlowLayout::Horizontal);
+
+        assert!(flow.edge("reply-branch").is_some());
+        assert!(flow.node("project-1").is_some());
     }
 
     #[test]
