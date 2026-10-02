@@ -202,10 +202,13 @@ impl App {
                 } else {
                     theme::text()
                 };
-                let sender_style = if !self.query.is_empty()
-                    && last_sender
-                        .to_lowercase()
-                        .contains(&self.query.to_lowercase())
+                let lowered_query = self.query.to_lowercase();
+                let sender_query = lowered_query
+                    .strip_prefix("from:")
+                    .unwrap_or(&lowered_query)
+                    .trim();
+                let sender_style = if !sender_query.is_empty()
+                    && last_sender.to_lowercase().contains(sender_query)
                 {
                     theme::title(true)
                 } else {

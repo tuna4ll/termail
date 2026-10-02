@@ -178,6 +178,9 @@ impl Mail {
 
     pub fn matches(&self, query: &str) -> bool {
         let query = query.to_lowercase();
+        if let Some(sender) = query.strip_prefix("from:") {
+            return self.from.to_lowercase().contains(sender.trim());
+        }
         self.subject.to_lowercase().contains(&query)
             || self.from.to_lowercase().contains(&query)
             || self.body.to_lowercase().contains(&query)
@@ -322,5 +325,13 @@ mod tests {
 
         assert_eq!(conversations.len(), 1);
         assert_eq!(conversations[0].mail_ids, ["root", "first", "second"]);
+    }
+
+    #[test]
+    fn filters_messages_by_sender() {
+        let mail = Mail::new("root", "Ada <ada@example.com>", "update", "hello", None);
+
+        assert!(mail.matches("from:ada"));
+        assert!(!mail.matches("from:mert"));
     }
 }
