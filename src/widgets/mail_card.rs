@@ -13,6 +13,10 @@ pub struct MailCard {
     from: String,
     subject: String,
     body: String,
+    date: Option<String>,
+    unread: bool,
+    starred: bool,
+    attachment_count: usize,
     position: usize,
     total: usize,
 }
@@ -23,6 +27,10 @@ impl MailCard {
             from: mail.from.clone(),
             subject: mail.subject.clone(),
             body: mail.body.clone(),
+            date: mail.date.clone(),
+            unread: mail.unread,
+            starred: mail.starred,
+            attachment_count: mail.attachment_count,
             position,
             total,
         }
@@ -53,7 +61,13 @@ impl NodeContent for MailCard {
             return;
         }
 
-        let subject = clip_line(&self.subject, inner.width as usize);
+        let markers = match (self.unread, self.starred) {
+            (true, true) => "● ★ ",
+            (true, false) => "● ",
+            (false, true) => "★ ",
+            (false, false) => "",
+        };
+        let subject = clip_line(&format!("{markers}{}", self.subject), inner.width as usize);
         Paragraph::new(subject)
             .style(
                 Style::default()
@@ -93,7 +107,19 @@ impl NodeContent for MailCard {
         }
 
         if inner.height > 1 {
-            let footer = format!("{}/{}  ↵ open", self.position, self.total);
+            let mut details = Vec::new();
+            if let Some(date) = &self.date {
+                details.push(date.chars().take(10).collect());
+            }
+            if self.attachment_count > 0 {
+                details.push(format!("{} file", self.attachment_count));
+            }
+            let details = if details.is_empty() {
+                String::new()
+            } else {
+                format!("{}  ", details.join(" · "))
+            };
+            let footer = format!("{details}{}/{}  ↵ open", self.position, self.total);
             let style = Style::default().fg(if ctx.selected {
                 palette.accent
             } else {
