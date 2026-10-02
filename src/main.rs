@@ -68,6 +68,9 @@ pub struct App {
     load_rx: mpsc::UnboundedReceiver<Result<LoadReport, LoadError>>,
     spinner_tick: u64,
     skipped: usize,
+    query: String,
+    searching: bool,
+    filter: InboxFilter,
 }
 
 #[derive(Debug)]
@@ -76,6 +79,23 @@ enum MailboxState {
     Ready,
     Empty,
     Error(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InboxFilter {
+    All,
+    Unread,
+    Starred,
+}
+
+impl InboxFilter {
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Unread => "unread",
+            Self::Starred => "starred",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -102,6 +122,9 @@ impl App {
             load_rx,
             spinner_tick: 0,
             skipped: 0,
+            query: String::new(),
+            searching: false,
+            filter: InboxFilter::All,
         };
         app.reload();
         app
@@ -150,25 +173,60 @@ impl App {
             return;
         }
 
-        let items: Vec<ListItem> = self
-            .conversations
+        let visible = self.visible_conversations();
+        let items: Vec<ListItem> = visible
             .iter()
-            .map(|conversation| {
+            .map(|index| {
+                let conversation = &self.conversations[*index];
                 let last_sender = conversation.last_sender(&self.mails).unwrap_or("unknown");
+                let unread = conversation.is_unread(&self.mails);
+                let starred = conversation.is_starred(&self.mails);
+                let marker = match (unread, starred) {
+                    (true, true) => "●★",
+                    (true, false) => "● ",
+                    (false, true) => " ★",
+                    (false, false) => "  ",
+                };
+                let subject = format!(
+                    "{marker} {} · {}",
+                    conversation.subject,
+                    conversation.mail_ids.len()
+                );
+                let subject_style = if !self.query.is_empty()
+                    && conversation
+                        .subject
+                        .to_lowercase()
+                        .contains(&self.query.to_lowercase())
+                {
+                    theme::title(true)
+                } else {
+                    theme::text()
+                };
+                let sender_style = if !self.query.is_empty()
+                    && last_sender
+                        .to_lowercase()
+                        .contains(&self.query.to_lowercase())
+                {
+                    theme::title(true)
+                } else {
+                    theme::muted()
+                };
                 ListItem::new(vec![
-                    Line::from(format!(
-                        "{} · {}",
-                        conversation.subject,
-                        conversation.mail_ids.len()
-                    )),
-                    Line::styled(format!("from {last_sender}"), theme::muted()),
+                    Line::styled(subject, subject_style),
+                    Line::styled(format!("from {last_sender}"), sender_style),
                 ])
             })
             .collect();
 
         let inbox_focused = self.reader.is_none() && self.focus == Pane::Inbox;
         let workspace_focused = self.reader.is_none() && self.focus == Pane::Workspace;
-        let title = if self.skipped > 0 {
+        let title = if self.searching {
+            format!(" search: {}_ ", self.query)
+        } else if !self.query.is_empty() {
+            format!(" inbox • {} • /{} ", self.filter.label(), self.query)
+        } else if self.filter != InboxFilter::All {
+            format!(" inbox • {} ", self.filter.label())
+        } else if self.skipped > 0 {
             format!(" inbox • {} skipped ", self.skipped)
         } else if inbox_focused {
             " inbox • active ".into()
@@ -195,7 +253,9 @@ impl App {
             match self.focus {
                 Pane::Inbox => frame.render_stateful_widget(list, rows[0], &mut list_state),
                 Pane::Workspace => {
-                    if let Some(workspace) = &mut self.workspace {
+                    if visible.is_empty() {
+                        draw_no_matches(frame, rows[0]);
+                    } else if let Some(workspace) = &mut self.workspace {
                         workspace.draw(frame, rows[0], workspace_focused);
                     }
                 }
@@ -215,7 +275,9 @@ impl App {
                 .constraints(constraints)
                 .split(rows[0]);
             frame.render_stateful_widget(list, areas[0], &mut list_state);
-            if let Some(workspace) = &mut self.workspace {
+            if visible.is_empty() {
+                draw_no_matches(frame, areas[1]);
+            } else if let Some(workspace) = &mut self.workspace {
                 workspace.draw(frame, areas[1], workspace_focused);
             }
             if areas.len() == 3 {
@@ -223,13 +285,17 @@ impl App {
             }
         }
 
-        let hints = if self.reader.is_some() {
+        let hints = if self.searching {
+            status_line(&[("type", "search"), ("enter", "apply"), ("esc", "clear")])
+        } else if self.reader.is_some() {
             status_line(&[("j/k", "scroll"), ("pgup/pgdn", "page"), ("esc", "close")])
         } else {
             match self.focus {
                 Pane::Inbox => status_line(&[
                     ("tab", "thread map"),
                     ("j/k", "select"),
+                    ("/", "search"),
+                    ("a/u/s", "filter"),
                     ("enter", "open"),
                     ("q", "quit"),
                 ]),
@@ -261,6 +327,7 @@ impl App {
             Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key_event(key),
             Event::Mouse(mouse) => {
                 if self.reader.is_none()
+                    && !self.visible_conversations().is_empty()
                     && let Some(workspace) = &mut self.workspace
                     && let Some(mail_id) = workspace.handle_mouse(mouse)
                 {
@@ -284,6 +351,30 @@ impl App {
             return;
         }
 
+        if self.searching {
+            match key.code {
+                KeyCode::Enter => self.searching = false,
+                KeyCode::Esc => {
+                    self.searching = false;
+                    self.query.clear();
+                    self.refresh_inbox();
+                }
+                KeyCode::Backspace => {
+                    self.query.pop();
+                    self.refresh_inbox();
+                }
+                KeyCode::Char(character)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    self.query.push(character);
+                    self.refresh_inbox();
+                }
+                _ => {}
+            }
+            return;
+        }
+
         if self.reader.is_some() {
             match key.code {
                 KeyCode::Esc => self.reader = None,
@@ -301,6 +392,11 @@ impl App {
         }
 
         match (key.modifiers, key.code) {
+            (_, KeyCode::Esc) if !self.query.is_empty() => {
+                self.query.clear();
+                self.refresh_inbox();
+            }
+
             (_, KeyCode::Esc | KeyCode::Char('q'))
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
                 self.running = false;
@@ -315,8 +411,26 @@ impl App {
 
             (_, KeyCode::Char('r')) => self.reload(),
 
+            (_, KeyCode::Char('/')) if self.focus == Pane::Inbox => self.searching = true,
+
+            (_, KeyCode::Char('a')) if self.focus == Pane::Inbox => {
+                self.filter = InboxFilter::All;
+                self.refresh_inbox();
+            }
+
+            (_, KeyCode::Char('u')) if self.focus == Pane::Inbox => {
+                self.filter = InboxFilter::Unread;
+                self.refresh_inbox();
+            }
+
+            (_, KeyCode::Char('s')) if self.focus == Pane::Inbox => {
+                self.filter = InboxFilter::Starred;
+                self.refresh_inbox();
+            }
+
             (_, KeyCode::Down | KeyCode::Char('j'))
-                if self.focus == Pane::Inbox && self.selected + 1 < self.conversations.len() =>
+                if self.focus == Pane::Inbox
+                    && self.selected + 1 < self.visible_conversations().len() =>
             {
                 self.selected += 1;
                 self.sync_workspace();
@@ -345,8 +459,9 @@ impl App {
 
             (_, KeyCode::Enter | KeyCode::Char(' ')) => {
                 let mail_id = match self.focus {
-                    Pane::Inbox => self.conversations[self.selected]
-                        .latest_mail_id()
+                    Pane::Inbox => self
+                        .selected_conversation()
+                        .and_then(Conversation::latest_mail_id)
                         .map(str::to_owned),
                     Pane::Workspace => self
                         .workspace
@@ -363,11 +478,15 @@ impl App {
     }
 
     fn sync_workspace(&mut self) {
-        let Some(mail_id) = self.conversations[self.selected].latest_mail_id() else {
+        let Some(mail_id) = self
+            .selected_conversation()
+            .and_then(Conversation::latest_mail_id)
+            .map(str::to_owned)
+        else {
             return;
         };
         if let Some(workspace) = &mut self.workspace {
-            workspace.show_conversation(&self.mails, mail_id);
+            workspace.show_conversation(&self.mails, &mail_id);
         }
     }
 
@@ -379,21 +498,23 @@ impl App {
         else {
             return;
         };
-        if let Some(index) = self
-            .conversations
-            .iter()
-            .position(|conversation| conversation.mail_ids.iter().any(|id| id == &mail_id))
-        {
+        if let Some(index) = self.visible_conversations().iter().position(|index| {
+            self.conversations[*index]
+                .mail_ids
+                .iter()
+                .any(|id| id == &mail_id)
+        }) {
             self.selected = index;
         }
     }
 
     fn open_mail(&mut self, mail_id: &str) {
-        if let Some(index) = self
-            .conversations
-            .iter()
-            .position(|conversation| conversation.mail_ids.iter().any(|id| id == mail_id))
-        {
+        if let Some(index) = self.visible_conversations().iter().position(|index| {
+            self.conversations[*index]
+                .mail_ids
+                .iter()
+                .any(|id| id == mail_id)
+        }) {
             self.selected = index;
             self.reader = Some(Reader::new(mail_id.into()));
         }
@@ -449,6 +570,33 @@ impl App {
         self.reader = None;
         self.selected = 0;
         self.skipped = 0;
+    }
+
+    fn visible_conversations(&self) -> Vec<usize> {
+        self.conversations
+            .iter()
+            .enumerate()
+            .filter(|(_, conversation)| match self.filter {
+                InboxFilter::All => true,
+                InboxFilter::Unread => conversation.is_unread(&self.mails),
+                InboxFilter::Starred => conversation.is_starred(&self.mails),
+            })
+            .filter(|(_, conversation)| conversation.matches(&self.mails, &self.query))
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    fn selected_conversation(&self) -> Option<&Conversation> {
+        let index = *self.visible_conversations().get(self.selected)?;
+        self.conversations.get(index)
+    }
+
+    fn refresh_inbox(&mut self) {
+        let count = self.visible_conversations().len();
+        self.selected = self.selected.min(count.saturating_sub(1));
+        if count > 0 {
+            self.sync_workspace();
+        }
     }
 
     fn draw_mailbox_state(&self, frame: &mut Frame, area: Rect) {
@@ -524,6 +672,29 @@ fn status_line(hints: &[(&str, &str)]) -> Line<'static> {
         spans.push(Span::styled(format!(" {label}"), theme::muted()));
     }
     Line::from(spans)
+}
+
+fn draw_no_matches(frame: &mut Frame, area: Rect) {
+    let block = Block::bordered()
+        .border_style(theme::border(false))
+        .title_style(theme::title(false))
+        .title(" workspace ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(
+            "No matching conversations\n\nChange the filter or press esc to clear search.",
+        )
+        .style(theme::muted())
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true }),
+        Rect::new(
+            inner.x,
+            inner.y + inner.height.saturating_sub(3) / 2,
+            inner.width,
+            3.min(inner.height),
+        ),
+    );
 }
 
 fn reader_is_docked(width: u16, reader_open: bool) -> bool {
