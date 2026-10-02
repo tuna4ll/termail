@@ -46,10 +46,7 @@ impl Reader {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect, mail: &Mail, clear: bool) {
-        let content = format!(
-            "from: {}\nsubject: {}\n\n{}",
-            mail.from, mail.subject, mail.body
-        );
+        let content = message_content(mail);
         let text = message_text(mail);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -90,30 +87,60 @@ impl Reader {
     }
 }
 
-fn message_text(mail: &Mail) -> Text<'_> {
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("from     ", theme::muted()),
-            Span::styled(
-                mail.from.as_str(),
-                Style::default()
-                    .fg(theme::TEXT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("subject  ", theme::muted()),
-            Span::styled(
-                mail.subject.as_str(),
-                Style::default()
-                    .fg(theme::TEXT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::default(),
-    ];
-    lines.extend(mail.body.lines().map(Line::from));
+fn message_text(mail: &Mail) -> Text<'static> {
+    let mut lines = vec![header_line("from", &mail.from, true)];
+    if !mail.to.is_empty() {
+        lines.push(header_line("to", &mail.to.join(", "), false));
+    }
+    if !mail.cc.is_empty() {
+        lines.push(header_line("cc", &mail.cc.join(", "), false));
+    }
+    if let Some(date) = &mail.date {
+        lines.push(header_line("date", date, false));
+    }
+    lines.push(header_line("subject", &mail.subject, true));
+    if mail.attachment_count > 0 {
+        lines.push(header_line(
+            "files",
+            &format!("{} attachment(s)", mail.attachment_count),
+            false,
+        ));
+    }
+    lines.push(Line::default());
+    lines.extend(mail.body.lines().map(|line| Line::from(line.to_owned())));
     Text::from(lines)
+}
+
+fn header_line(label: &str, value: &str, bold: bool) -> Line<'static> {
+    let style = if bold {
+        Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        theme::text()
+    };
+    Line::from(vec![
+        Span::styled(format!("{label:<8}"), theme::muted()),
+        Span::styled(value.to_owned(), style),
+    ])
+}
+
+fn message_content(mail: &Mail) -> String {
+    let mut headers = vec![format!("from: {}", mail.from)];
+    if !mail.to.is_empty() {
+        headers.push(format!("to: {}", mail.to.join(", ")));
+    }
+    if !mail.cc.is_empty() {
+        headers.push(format!("cc: {}", mail.cc.join(", ")));
+    }
+    if let Some(date) = &mail.date {
+        headers.push(format!("date: {date}"));
+    }
+    headers.push(format!("subject: {}", mail.subject));
+    if mail.attachment_count > 0 {
+        headers.push(format!("files: {} attachment(s)", mail.attachment_count));
+    }
+    format!("{}\n\n{}", headers.join("\n"), mail.body)
 }
 
 fn wrapped_line_count(value: &str, width: u16) -> usize {
