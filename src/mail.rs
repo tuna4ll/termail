@@ -200,49 +200,71 @@ pub fn demo_mails() -> Vec<Mail> {
             "project update",
             "hey,\nthe new build is ready.\ncan you review it?",
             None,
-        ),
+        )
+        .with_recipients(&["tuna@tunakilic.com"], &[])
+        .with_date("2026-09-29T09:14:00+03:00", 1_801_208_040)
+        .with_state(true, true)
+        .with_attachments(1),
         Mail::new(
             "project-2",
             "tuna@tunakilic.com",
             "re: project update",
             "sure, i'll check it tonight.",
             Some("project-1"),
-        ),
+        )
+        .with_recipients(&["ada@example.com"], &[])
+        .with_date("2026-09-29T18:42:00+03:00", 1_801_242_120)
+        .with_references(&["project-1"]),
         Mail::new(
             "project-3",
             "ada@example.com",
             "re: project update",
             "great, i added the release notes too.",
             Some("project-2"),
-        ),
+        )
+        .with_recipients(&["tuna@tunakilic.com"], &[])
+        .with_date("2026-09-30T08:07:00+03:00", 1_801_290_420)
+        .with_references(&["project-1", "project-2"])
+        .with_state(true, false),
         Mail::new(
             "weekend-1",
             "mert@example.com",
             "weekend plans",
             "coffee on saturday?",
             None,
-        ),
+        )
+        .with_recipients(&["tuna@tunakilic.com"], &[])
+        .with_date("2026-09-28T17:31:00+03:00", 1_801_151_460),
         Mail::new(
             "weekend-2",
             "tuna@tunakilic.com",
             "re: weekend plans",
             "sounds good. same place at two?",
             Some("weekend-1"),
-        ),
+        )
+        .with_recipients(&["mert@example.com"], &[])
+        .with_date("2026-09-28T18:02:00+03:00", 1_801_153_320)
+        .with_references(&["weekend-1"]),
         Mail::new(
             "pull-1",
             "github@github.com",
             "review requested",
             "ada requested your review on pull request #42.",
             None,
-        ),
+        )
+        .with_recipients(&["tuna@tunakilic.com"], &[])
+        .with_date("2026-09-30T10:18:00+03:00", 1_801_298_280)
+        .with_state(true, false),
         Mail::new(
             "pull-2",
             "github@github.com",
             "pull request merged",
             "pull request #42 has been merged.",
             Some("pull-1"),
-        ),
+        )
+        .with_recipients(&["tuna@tunakilic.com"], &[])
+        .with_date("2026-09-30T12:46:00+03:00", 1_801_307_160)
+        .with_references(&["pull-1"]),
     ]
 }
 
