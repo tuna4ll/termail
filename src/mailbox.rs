@@ -170,6 +170,7 @@ mod tests {
             b"From: Ada <ada@example.com>\r\nTo: Tuna <tuna@example.com>\r\nSubject: Build ready\r\nMessage-ID: <root@example.com>\r\nDate: Thu, 1 Oct 2026 09:00:00 +0300\r\n\r\nPlease review it.",
         )
         .unwrap();
+        fs::write(root.join("new/broken"), []).unwrap();
 
         let report = MailboxSource::Maildir(root.clone()).load().unwrap();
         fs::remove_dir_all(root).unwrap();
@@ -179,5 +180,7 @@ mod tests {
         assert_eq!(report.mails[0].to, ["Tuna <tuna@example.com>"]);
         assert!(report.mails[0].starred);
         assert!(!report.mails[0].unread);
+        assert_eq!(report.attempted, 2);
+        assert_eq!(report.skipped.len(), 1);
     }
 }
