@@ -165,7 +165,13 @@ impl App {
             .split(frame.area());
 
         if !matches!(self.mailbox_state, MailboxState::Ready) {
-            self.draw_mailbox_state(frame, rows[0]);
+            draw_mailbox_state(
+                frame,
+                rows[0],
+                &self.mailbox_state,
+                &self.source,
+                self.spinner_tick,
+            );
             frame.render_widget(
                 Paragraph::new(status_line(&[("r", "retry"), ("q", "quit")])),
                 rows[1],
@@ -601,56 +607,61 @@ impl App {
             self.sync_workspace();
         }
     }
+}
 
-    fn draw_mailbox_state(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::bordered()
-            .border_style(theme::border(false))
-            .title_style(theme::title(false))
-            .title(" termail ");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let width = inner.width.min(64);
-        let content = Rect::new(
-            inner.x + inner.width.saturating_sub(width) / 2,
-            inner.y + inner.height.saturating_sub(5) / 2,
-            width,
-            5.min(inner.height),
-        );
+fn draw_mailbox_state(
+    frame: &mut Frame,
+    area: Rect,
+    state: &MailboxState,
+    source: &MailboxSource,
+    spinner_tick: u64,
+) {
+    let block = Block::bordered()
+        .border_style(theme::border(false))
+        .title_style(theme::title(false))
+        .title(" termail ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let width = inner.width.min(64);
+    let content = Rect::new(
+        inner.x + inner.width.saturating_sub(width) / 2,
+        inner.y + inner.height.saturating_sub(5) / 2,
+        width,
+        5.min(inner.height),
+    );
 
-        match &self.mailbox_state {
-            MailboxState::Loading => {
-                let spinner_area = Rect::new(
-                    content.x + content.width.saturating_sub(6) / 2,
-                    content.y,
-                    6.min(content.width),
-                    1,
-                );
-                frame.render_widget(
-                    FluxSpinner::new(self.spinner_tick)
-                        .width(6)
-                        .color(theme::ACCENT),
-                    spinner_area,
-                );
-                frame.render_widget(
-                    Paragraph::new(format!("Loading {}", self.source.label()))
-                        .style(theme::text())
-                        .alignment(Alignment::Center),
-                    Rect::new(content.x, content.y.saturating_add(2), content.width, 1),
-                );
-            }
-            MailboxState::Empty => {
-                frame.render_widget(
-                    Paragraph::new(
-                        "No messages found\n\nAdd mail to cur/ or new/, then press r to retry.",
-                    )
+    match state {
+        MailboxState::Loading => {
+            let spinner_area = Rect::new(
+                content.x + content.width.saturating_sub(6) / 2,
+                content.y,
+                6.min(content.width),
+                1,
+            );
+            frame.render_widget(
+                FluxSpinner::new(spinner_tick).width(6).color(theme::ACCENT),
+                spinner_area,
+            );
+            frame.render_widget(
+                Paragraph::new(format!("Loading {}", source.label()))
                     .style(theme::text())
-                    .alignment(Alignment::Center)
-                    .wrap(Wrap { trim: true }),
-                    content,
-                );
-            }
-            MailboxState::Error(error) => {
-                frame.render_widget(
+                    .alignment(Alignment::Center),
+                Rect::new(content.x, content.y.saturating_add(2), content.width, 1),
+            );
+        }
+        MailboxState::Empty => {
+            frame.render_widget(
+                Paragraph::new(
+                    "No messages found\n\nAdd mail to cur/ or new/, then press r to retry.",
+                )
+                .style(theme::text())
+                .alignment(Alignment::Center)
+                .wrap(Wrap { trim: true }),
+                content,
+            );
+        }
+        MailboxState::Error(error) => {
+            frame.render_widget(
                     Paragraph::new(format!(
                         "Unable to load mailbox\n\n{error}\n\nCheck the path and permissions, then press r to retry."
                     ))
@@ -659,9 +670,8 @@ impl App {
                     .wrap(Wrap { trim: true }),
                     content,
                 );
-            }
-            MailboxState::Ready => {}
         }
+        MailboxState::Ready => {}
     }
 }
 
@@ -739,9 +749,11 @@ fn print_help() {
 mod tests {
     use std::{ffi::OsString, path::PathBuf};
 
+    use ratatui::{Terminal, backend::TestBackend};
+
     use crate::mailbox::MailboxSource;
 
-    use super::{parse_source, reader_is_docked};
+    use super::{MailboxState, draw_mailbox_state, parse_source, reader_is_docked};
 
     #[test]
     fn docks_readers_only_when_they_fit() {
@@ -757,5 +769,30 @@ mod tests {
             .unwrap();
 
         assert_eq!(source, MailboxSource::Maildir(PathBuf::from("/tmp/mail")));
+    }
+
+    #[test]
+    fn renders_mailbox_states_with_recovery() {
+        assert!(render_state(&MailboxState::Loading).contains("Loading demo mailbox"));
+        assert!(render_state(&MailboxState::Empty).contains("No messages found"));
+
+        let screen = render_state(&MailboxState::Error("permission denied".into()));
+        assert!(screen.contains("Unable to load mailbox"));
+        assert!(screen.contains("press r to retry"));
+    }
+
+    fn render_state(state: &MailboxState) -> String {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw_mailbox_state(frame, frame.area(), state, &MailboxSource::Demo, 2))
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
     }
 }
