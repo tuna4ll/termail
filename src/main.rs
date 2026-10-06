@@ -318,6 +318,7 @@ impl App {
                     ("/", "search"),
                     ("1/2/3", "filter"),
                     ("m/s", "read/star"),
+                    ("a/d", "archive/trash"),
                     ("enter", "open"),
                     ("q", "quit"),
                 ]),
@@ -408,6 +409,14 @@ impl App {
             }
             KeyCode::Char('u') if self.undo.is_some() => {
                 self.undo_last();
+                return;
+            }
+            KeyCode::Char('a') => {
+                self.move_active_message(true);
+                return;
+            }
+            KeyCode::Char('d') => {
+                self.move_active_message(false);
                 return;
             }
             _ => {}
@@ -702,6 +711,40 @@ impl App {
                 }
                 Err(error) => self.notice = Some(format!("Unable to undo: {error}")),
             }
+        }
+    }
+
+    fn move_active_message(&mut self, archive: bool) {
+        let Some(mail_id) = self.active_mail_id() else {
+            return;
+        };
+        let Some(index) = self.mails.iter().position(|mail| mail.id == mail_id) else {
+            return;
+        };
+        let snapshot = matches!(self.source, MailboxSource::Demo).then(|| self.mails.clone());
+        let result = if archive {
+            self.source.archive(&self.mails[index])
+        } else {
+            self.source.trash(&self.mails[index])
+        };
+        match result {
+            Ok(change) => {
+                self.mails.remove(index);
+                self.reader = None;
+                let label = if archive {
+                    "Archived message"
+                } else {
+                    "Moved message to Trash"
+                };
+                self.undo = Some(UndoAction {
+                    change,
+                    demo_mails: snapshot,
+                    label: label.into(),
+                });
+                self.notice = Some(label.into());
+                self.rebuild_mailbox(None);
+            }
+            Err(error) => self.notice = Some(format!("Unable to move message: {error}")),
         }
     }
 
