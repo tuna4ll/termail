@@ -73,6 +73,7 @@ pub struct App {
     filter: InboxFilter,
     undo: Option<UndoAction>,
     notice: Option<String>,
+    mailbox_fingerprint: u64,
 }
 
 struct UndoAction {
@@ -135,6 +136,7 @@ impl App {
             filter: InboxFilter::All,
             undo: None,
             notice: None,
+            mailbox_fingerprint: 0,
         };
         app.reload();
         app
@@ -143,6 +145,7 @@ impl App {
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
         self.running = true;
         let mut animation = interval(Duration::from_millis(80));
+        let mut mailbox_sync = interval(Duration::from_secs(2));
 
         while self.running {
             terminal.draw(|frame| self.draw(frame))?;
@@ -152,6 +155,7 @@ impl App {
                         self.spinner_tick = self.spinner_tick.wrapping_add(1);
                     }
                 }
+                _ = mailbox_sync.tick() => self.check_mailbox_changes(),
                 result = self.load_rx.recv() => {
                     if let Some(result) = result {
                         self.apply_load(result);
@@ -570,7 +574,6 @@ impl App {
     fn reload(&mut self) {
         self.mailbox_state = MailboxState::Loading;
         self.spinner_tick = 0;
-        self.reader = None;
         let source = self.source.clone();
         let sender = self.load_tx.clone();
         tokio::task::spawn_blocking(move || {
@@ -592,15 +595,16 @@ impl App {
                 self.mailbox_state = MailboxState::Empty;
             }
             Ok(report) => {
+                let active_mail_id = self.active_mail_id();
                 self.mails = report.mails;
-                self.conversations = group_conversations(&self.mails);
-                self.selected = 0;
                 self.skipped = report.skipped.len();
-                self.workspace = self
-                    .conversations
-                    .first()
-                    .and_then(Conversation::latest_mail_id)
-                    .map(|mail_id| Workspace::new(&self.mails, mail_id));
+                self.rebuild_mailbox(active_mail_id.as_deref());
+                if self.reader.as_ref().is_some_and(|reader| {
+                    !self.mails.iter().any(|mail| mail.id == reader.mail_id())
+                }) {
+                    self.reader = None;
+                }
+                self.refresh_fingerprint();
                 self.mailbox_state = MailboxState::Ready;
             }
             Err(error) => {
@@ -661,6 +665,7 @@ impl App {
                     label: label.into(),
                 });
                 self.notice = Some(label.into());
+                self.refresh_fingerprint();
                 self.rebuild_mailbox(Some(&mail_id));
             }
             Err(error) => self.notice = Some(format!("Unable to update message: {error}")),
@@ -689,6 +694,7 @@ impl App {
                     label: label.into(),
                 });
                 self.notice = Some(label.into());
+                self.refresh_fingerprint();
                 self.rebuild_mailbox(Some(&mail_id));
             }
             Err(error) => self.notice = Some(format!("Unable to update message: {error}")),
@@ -742,6 +748,7 @@ impl App {
                     label: label.into(),
                 });
                 self.notice = Some(label.into());
+                self.refresh_fingerprint();
                 self.rebuild_mailbox(None);
             }
             Err(error) => self.notice = Some(format!("Unable to move message: {error}")),
@@ -766,6 +773,24 @@ impl App {
             .selected_conversation()
             .and_then(Conversation::latest_mail_id)
             .map(|mail_id| Workspace::new(&self.mails, mail_id));
+    }
+
+    fn refresh_fingerprint(&mut self) {
+        if let Ok(fingerprint) = self.source.fingerprint() {
+            self.mailbox_fingerprint = fingerprint;
+        }
+    }
+
+    fn check_mailbox_changes(&mut self) {
+        if !matches!(self.mailbox_state, MailboxState::Ready) {
+            return;
+        }
+        if let Ok(fingerprint) = self.source.fingerprint()
+            && fingerprint != self.mailbox_fingerprint
+        {
+            self.notice = Some("Mailbox changed · refreshing".into());
+            self.reload();
+        }
     }
 
     fn visible_conversations(&self) -> Vec<usize> {
