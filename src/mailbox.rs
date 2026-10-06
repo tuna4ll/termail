@@ -67,7 +67,9 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
     let mut attempted = 0;
 
     for folder in FolderIterator::new(path, Some("."))? {
-        for message in folder? {
+        let folder = folder?;
+        let mailbox = folder.name().unwrap_or("INBOX").to_owned();
+        for message in folder {
             attempted += 1;
             let message = message?;
             let Some(parsed) = MessageParser::default().parse(message.contents()) else {
@@ -113,6 +115,8 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
                 unread,
                 starred,
                 attachment_count: parsed.attachments().count(),
+                source_path: Some(message.path().to_path_buf()),
+                mailbox: Some(mailbox.clone()),
             });
         }
     }

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, path::PathBuf};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mail {
@@ -15,6 +15,8 @@ pub struct Mail {
     pub unread: bool,
     pub starred: bool,
     pub attachment_count: usize,
+    pub source_path: Option<PathBuf>,
+    pub mailbox: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -145,6 +147,8 @@ impl Mail {
             unread: false,
             starred: false,
             attachment_count: 0,
+            source_path: None,
+            mailbox: None,
         }
     }
 
