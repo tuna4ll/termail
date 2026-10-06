@@ -65,6 +65,14 @@ impl MailboxSource {
         self.set_flag(mail, 'F', starred)
     }
 
+    pub fn archive(&self, mail: &Mail) -> Result<Option<MaildirChange>, LoadError> {
+        self.move_to(mail, ".Archive")
+    }
+
+    pub fn trash(&self, mail: &Mail) -> Result<Option<MaildirChange>, LoadError> {
+        self.move_to(mail, ".Trash")
+    }
+
     fn set_flag(
         &self,
         mail: &Mail,
@@ -83,6 +91,23 @@ impl MailboxSource {
             });
         }
         rename_with_flag(path, flag, enabled)
+            .map(Some)
+            .map_err(Into::into)
+    }
+
+    fn move_to(&self, mail: &Mail, folder: &str) -> Result<Option<MaildirChange>, LoadError> {
+        let Self::Maildir(root) = self else {
+            return Ok(None);
+        };
+        let path = mail.source_path.as_ref().ok_or_else(|| LoadError {
+            message: "Message has no Maildir path.".into(),
+        })?;
+        if !path.starts_with(root) {
+            return Err(LoadError {
+                message: "Message is outside the active Maildir.".into(),
+            });
+        }
+        move_to_folder(path, &root.join(folder))
             .map(Some)
             .map_err(Into::into)
     }
@@ -122,6 +147,9 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
     for folder in FolderIterator::new(path, Some("."))? {
         let folder = folder?;
         let mailbox = folder.name().unwrap_or("INBOX").to_owned();
+        if ["Archive", "Trash", "Drafts"].contains(&mailbox.as_str()) {
+            continue;
+        }
         for message in folder {
             attempted += 1;
             let message = message?;
@@ -209,6 +237,29 @@ fn rename_with_flag(path: &Path, flag: char, enabled: bool) -> io::Result<Maildi
     })
 }
 
+fn move_to_folder(path: &Path, folder: &Path) -> io::Result<MaildirChange> {
+    for child in ["cur", "new", "tmp"] {
+        fs::create_dir_all(folder.join(child))?;
+    }
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid Maildir filename."))?;
+    let mut after = folder.join("cur").join(file_name);
+    if after.exists() {
+        let unique = format!(
+            "{}.termail-{}",
+            file_name.to_string_lossy(),
+            std::process::id()
+        );
+        after = folder.join("cur").join(unique);
+    }
+    fs::rename(path, &after)?;
+    Ok(MaildirChange {
+        before: path.to_path_buf(),
+        after,
+    })
+}
+
 fn clean_id(value: &str) -> String {
     value
         .trim()
@@ -271,6 +322,11 @@ mod tests {
         assert!(source.load().unwrap().mails[0].unread);
         change.undo().unwrap();
         assert!(!source.load().unwrap().mails[0].unread);
+
+        let change = source.archive(&report.mails[0]).unwrap().unwrap();
+        assert!(source.load().unwrap().mails.is_empty());
+        change.undo().unwrap();
+        assert_eq!(source.load().unwrap().mails.len(), 1);
 
         fs::remove_dir_all(root).unwrap();
     }
