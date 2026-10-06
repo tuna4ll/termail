@@ -1,4 +1,7 @@
-use std::{fmt, io, path::PathBuf};
+use std::{
+    fmt, fs, io,
+    path::{Path, PathBuf},
+};
 
 use mail_parser::{
     Address, MessageParser,
@@ -25,6 +28,12 @@ pub struct LoadError {
     message: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct MaildirChange {
+    before: PathBuf,
+    after: PathBuf,
+}
+
 impl MailboxSource {
     pub fn label(&self) -> String {
         match self {
@@ -42,6 +51,46 @@ impl MailboxSource {
             }),
             Self::Maildir(path) => load_maildir(path),
         }
+    }
+
+    pub fn set_seen(&self, mail: &Mail, seen: bool) -> Result<Option<MaildirChange>, LoadError> {
+        self.set_flag(mail, 'S', seen)
+    }
+
+    pub fn set_starred(
+        &self,
+        mail: &Mail,
+        starred: bool,
+    ) -> Result<Option<MaildirChange>, LoadError> {
+        self.set_flag(mail, 'F', starred)
+    }
+
+    fn set_flag(
+        &self,
+        mail: &Mail,
+        flag: char,
+        enabled: bool,
+    ) -> Result<Option<MaildirChange>, LoadError> {
+        let Self::Maildir(root) = self else {
+            return Ok(None);
+        };
+        let path = mail.source_path.as_ref().ok_or_else(|| LoadError {
+            message: "Message has no Maildir path.".into(),
+        })?;
+        if !path.starts_with(root) {
+            return Err(LoadError {
+                message: "Message is outside the active Maildir.".into(),
+            });
+        }
+        rename_with_flag(path, flag, enabled)
+            .map(Some)
+            .map_err(Into::into)
+    }
+}
+
+impl MaildirChange {
+    pub fn undo(self) -> Result<(), LoadError> {
+        fs::rename(self.after, self.before).map_err(Into::into)
     }
 }
 
@@ -129,6 +178,33 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
     })
 }
 
+fn rename_with_flag(path: &Path, flag: char, enabled: bool) -> io::Result<MaildirChange> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid Maildir filename."))?;
+    let (base, current) = file_name.rsplit_once(":2,").unwrap_or((file_name, ""));
+    let mut flags: Vec<char> = current.chars().filter(|value| *value != flag).collect();
+    if enabled {
+        flags.push(flag);
+    }
+    flags.sort_unstable();
+    flags.dedup();
+    let file_name = format!("{base}:2,{}", flags.into_iter().collect::<String>());
+    let parent = if enabled && flag == 'S' && path.parent().is_some_and(|dir| dir.ends_with("new"))
+    {
+        path.parent().unwrap().parent().unwrap().join("cur")
+    } else {
+        path.parent().unwrap().to_path_buf()
+    };
+    let after = parent.join(file_name);
+    fs::rename(path, &after)?;
+    Ok(MaildirChange {
+        before: path.to_path_buf(),
+        after,
+    })
+}
+
 fn clean_id(value: &str) -> String {
     value
         .trim()
@@ -176,8 +252,8 @@ mod tests {
         .unwrap();
         fs::write(root.join("new/broken"), []).unwrap();
 
-        let report = MailboxSource::Maildir(root.clone()).load().unwrap();
-        fs::remove_dir_all(root).unwrap();
+        let source = MailboxSource::Maildir(root.clone());
+        let report = source.load().unwrap();
 
         assert_eq!(report.mails.len(), 1);
         assert_eq!(report.mails[0].id, "root@example.com");
@@ -186,5 +262,12 @@ mod tests {
         assert!(!report.mails[0].unread);
         assert_eq!(report.attempted, 2);
         assert_eq!(report.skipped.len(), 1);
+
+        let change = source.set_seen(&report.mails[0], false).unwrap().unwrap();
+        assert!(source.load().unwrap().mails[0].unread);
+        change.undo().unwrap();
+        assert!(!source.load().unwrap().mails[0].unread);
+
+        fs::remove_dir_all(root).unwrap();
     }
 }
