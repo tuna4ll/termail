@@ -1,5 +1,8 @@
 use std::{
-    fmt, fs, io,
+    collections::hash_map::DefaultHasher,
+    fmt, fs,
+    hash::{Hash, Hasher},
+    io,
     path::{Path, PathBuf},
 };
 
@@ -50,6 +53,13 @@ impl MailboxSource {
                 attempted: 7,
             }),
             Self::Maildir(path) => load_maildir(path),
+        }
+    }
+
+    pub fn fingerprint(&self) -> Result<u64, LoadError> {
+        match self {
+            Self::Demo => Ok(0),
+            Self::Maildir(path) => mailbox_fingerprint(path).map_err(Into::into),
         }
     }
 
@@ -260,6 +270,37 @@ fn move_to_folder(path: &Path, folder: &Path) -> io::Result<MaildirChange> {
     })
 }
 
+fn mailbox_fingerprint(path: &Path) -> io::Result<u64> {
+    let mut fingerprint = 0;
+    fingerprint_dir(path, &mut fingerprint)?;
+    Ok(fingerprint)
+}
+
+fn fingerprint_dir(path: &Path, fingerprint: &mut u64) -> io::Result<()> {
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
+            if ["tmp", ".Archive", ".Trash", ".Drafts"].contains(&name) {
+                continue;
+            }
+            fingerprint_dir(&path, fingerprint)?;
+        } else if path.is_file() {
+            let metadata = entry.metadata()?;
+            let mut hasher = DefaultHasher::new();
+            path.hash(&mut hasher);
+            metadata.len().hash(&mut hasher);
+            metadata.modified()?.hash(&mut hasher);
+            *fingerprint ^= hasher.finish();
+        }
+    }
+    Ok(())
+}
+
 fn clean_id(value: &str) -> String {
     value
         .trim()
@@ -318,7 +359,9 @@ mod tests {
         assert_eq!(report.attempted, 2);
         assert_eq!(report.skipped.len(), 1);
 
+        let fingerprint = source.fingerprint().unwrap();
         let change = source.set_seen(&report.mails[0], false).unwrap().unwrap();
+        assert_ne!(source.fingerprint().unwrap(), fingerprint);
         assert!(source.load().unwrap().mails[0].unread);
         change.undo().unwrap();
         assert!(!source.load().unwrap().mails[0].unread);
