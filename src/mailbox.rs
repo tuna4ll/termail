@@ -89,6 +89,10 @@ impl MailboxSource {
 }
 
 impl MaildirChange {
+    pub fn after_path(&self) -> &Path {
+        &self.after
+    }
+
     pub fn undo(self) -> Result<(), LoadError> {
         fs::rename(self.after, self.before).map_err(Into::into)
     }

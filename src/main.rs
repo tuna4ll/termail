@@ -4,7 +4,7 @@ mod theme;
 mod widgets;
 
 use mail::{Conversation, Mail, group_conversations};
-use mailbox::{LoadError, LoadReport, MailboxSource};
+use mailbox::{LoadError, LoadReport, MailboxSource, MaildirChange};
 use widgets::reader::Reader;
 use widgets::workspace::Workspace;
 
@@ -71,6 +71,14 @@ pub struct App {
     query: String,
     searching: bool,
     filter: InboxFilter,
+    undo: Option<UndoAction>,
+    notice: Option<String>,
+}
+
+struct UndoAction {
+    change: Option<MaildirChange>,
+    demo_mails: Option<Vec<Mail>>,
+    label: String,
 }
 
 #[derive(Debug)]
@@ -125,6 +133,8 @@ impl App {
             query: String::new(),
             searching: false,
             filter: InboxFilter::All,
+            undo: None,
+            notice: None,
         };
         app.reload();
         app
@@ -294,7 +304,9 @@ impl App {
             }
         }
 
-        let hints = if self.searching {
+        let hints = if let Some(notice) = &self.notice {
+            action_line(notice, self.undo.is_some())
+        } else if self.searching {
             status_line(&[("type", "search"), ("enter", "apply"), ("esc", "clear")])
         } else if self.reader.is_some() {
             status_line(&[("j/k", "scroll"), ("pgup/pgdn", "page"), ("esc", "close")])
@@ -304,7 +316,8 @@ impl App {
                     ("tab", "thread map"),
                     ("j/k", "select"),
                     ("/", "search"),
-                    ("a/u/s", "filter"),
+                    ("1/2/3", "filter"),
+                    ("m/s", "read/star"),
                     ("enter", "open"),
                     ("q", "quit"),
                 ]),
@@ -384,6 +397,22 @@ impl App {
             return;
         }
 
+        match key.code {
+            KeyCode::Char('m') => {
+                self.toggle_read();
+                return;
+            }
+            KeyCode::Char('s') => {
+                self.toggle_starred();
+                return;
+            }
+            KeyCode::Char('u') if self.undo.is_some() => {
+                self.undo_last();
+                return;
+            }
+            _ => {}
+        }
+
         if self.reader.is_some() {
             match key.code {
                 KeyCode::Esc => self.reader = None,
@@ -422,17 +451,17 @@ impl App {
 
             (_, KeyCode::Char('/')) if self.focus == Pane::Inbox => self.searching = true,
 
-            (_, KeyCode::Char('a')) if self.focus == Pane::Inbox => {
+            (_, KeyCode::Char('1')) if self.focus == Pane::Inbox => {
                 self.filter = InboxFilter::All;
                 self.refresh_inbox();
             }
 
-            (_, KeyCode::Char('u')) if self.focus == Pane::Inbox => {
+            (_, KeyCode::Char('2')) if self.focus == Pane::Inbox => {
                 self.filter = InboxFilter::Unread;
                 self.refresh_inbox();
             }
 
-            (_, KeyCode::Char('s')) if self.focus == Pane::Inbox => {
+            (_, KeyCode::Char('3')) if self.focus == Pane::Inbox => {
                 self.filter = InboxFilter::Starred;
                 self.refresh_inbox();
             }
@@ -581,6 +610,121 @@ impl App {
         self.skipped = 0;
     }
 
+    fn active_mail_id(&self) -> Option<String> {
+        self.reader
+            .as_ref()
+            .map(|reader| reader.mail_id().to_owned())
+            .or_else(|| {
+                self.workspace
+                    .as_ref()
+                    .and_then(Workspace::selected_mail_id)
+            })
+            .or_else(|| {
+                self.selected_conversation()
+                    .and_then(Conversation::latest_mail_id)
+                    .map(str::to_owned)
+            })
+    }
+
+    fn toggle_read(&mut self) {
+        let Some(mail_id) = self.active_mail_id() else {
+            return;
+        };
+        let Some(index) = self.mails.iter().position(|mail| mail.id == mail_id) else {
+            return;
+        };
+        let target_seen = self.mails[index].unread;
+        let snapshot = matches!(self.source, MailboxSource::Demo).then(|| self.mails.clone());
+        match self.source.set_seen(&self.mails[index], target_seen) {
+            Ok(change) => {
+                if let Some(change) = &change {
+                    self.mails[index].source_path = Some(change.after_path().to_path_buf());
+                }
+                self.mails[index].unread = !target_seen;
+                let label = if target_seen {
+                    "Marked read"
+                } else {
+                    "Marked unread"
+                };
+                self.undo = Some(UndoAction {
+                    change,
+                    demo_mails: snapshot,
+                    label: label.into(),
+                });
+                self.notice = Some(label.into());
+                self.rebuild_mailbox(Some(&mail_id));
+            }
+            Err(error) => self.notice = Some(format!("Unable to update message: {error}")),
+        }
+    }
+
+    fn toggle_starred(&mut self) {
+        let Some(mail_id) = self.active_mail_id() else {
+            return;
+        };
+        let Some(index) = self.mails.iter().position(|mail| mail.id == mail_id) else {
+            return;
+        };
+        let target = !self.mails[index].starred;
+        let snapshot = matches!(self.source, MailboxSource::Demo).then(|| self.mails.clone());
+        match self.source.set_starred(&self.mails[index], target) {
+            Ok(change) => {
+                if let Some(change) = &change {
+                    self.mails[index].source_path = Some(change.after_path().to_path_buf());
+                }
+                self.mails[index].starred = target;
+                let label = if target { "Starred" } else { "Removed star" };
+                self.undo = Some(UndoAction {
+                    change,
+                    demo_mails: snapshot,
+                    label: label.into(),
+                });
+                self.notice = Some(label.into());
+                self.rebuild_mailbox(Some(&mail_id));
+            }
+            Err(error) => self.notice = Some(format!("Unable to update message: {error}")),
+        }
+    }
+
+    fn undo_last(&mut self) {
+        let Some(undo) = self.undo.take() else {
+            return;
+        };
+        if let Some(mails) = undo.demo_mails {
+            self.mails = mails;
+            self.rebuild_mailbox(None);
+            self.notice = Some(format!("Undid {}", undo.label.to_lowercase()));
+        } else if let Some(change) = undo.change {
+            match change.undo() {
+                Ok(()) => {
+                    self.notice = Some(format!("Undid {}", undo.label.to_lowercase()));
+                    self.reload();
+                }
+                Err(error) => self.notice = Some(format!("Unable to undo: {error}")),
+            }
+        }
+    }
+
+    fn rebuild_mailbox(&mut self, mail_id: Option<&str>) {
+        self.conversations = group_conversations(&self.mails);
+        let visible = self.visible_conversations();
+        self.selected = mail_id
+            .and_then(|mail_id| {
+                visible.iter().position(|index| {
+                    self.conversations[*index]
+                        .mail_ids
+                        .iter()
+                        .any(|id| id == mail_id)
+                })
+            })
+            .unwrap_or_default()
+            .min(visible.len().saturating_sub(1));
+        self.workspace = self
+            .selected_conversation()
+            .and_then(Conversation::latest_mail_id)
+            .map(|mail_id| Workspace::new(&self.mails, mail_id));
+    }
+
     fn visible_conversations(&self) -> Vec<usize> {
         self.conversations
             .iter()
@@ -683,6 +827,15 @@ fn status_line(hints: &[(&str, &str)]) -> Line<'static> {
         }
         spans.push(Span::styled(format!(" {key} "), theme::keycap()));
         spans.push(Span::styled(format!(" {label}"), theme::muted()));
+    }
+    Line::from(spans)
+}
+
+fn action_line(message: &str, undo: bool) -> Line<'static> {
+    let mut spans = vec![Span::styled(format!(" {message} "), theme::title(true))];
+    if undo {
+        spans.push(Span::styled(" u ", theme::keycap()));
+        spans.push(Span::styled(" undo", theme::muted()));
     }
     Line::from(spans)
 }
