@@ -29,8 +29,11 @@ use futures::StreamExt;
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::Stylize,
     text::{Line, Span},
-    widgets::{Block, Borders, HighlightSpacing, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{
+        Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Wrap,
+    },
 };
 use ratatui_spinner::FluxSpinner;
 use tokio::{sync::mpsc, time::interval};
@@ -83,6 +86,7 @@ pub struct App {
     notice: Option<String>,
     mailbox_fingerprint: u64,
     pending_draft: Option<PathBuf>,
+    overlay: Option<Overlay>,
 }
 
 struct UndoAction {
@@ -104,6 +108,11 @@ enum InboxFilter {
     All,
     Unread,
     Starred,
+}
+
+enum Overlay {
+    Help,
+    Command(String),
 }
 
 impl InboxFilter {
@@ -147,6 +156,7 @@ impl App {
             notice: None,
             mailbox_fingerprint: 0,
             pending_draft: None,
+            overlay: None,
         };
         app.reload();
         app
@@ -321,7 +331,11 @@ impl App {
             }
         }
 
-        let hints = if let Some(notice) = &self.notice {
+        let hints = if matches!(self.overlay, Some(Overlay::Help)) {
+            status_line(&[("esc", "close help")])
+        } else if matches!(self.overlay, Some(Overlay::Command(_))) {
+            status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
+        } else if let Some(notice) = &self.notice {
             action_line(notice, self.undo.is_some())
         } else if self.searching {
             status_line(&[("type", "search"), ("enter", "apply"), ("esc", "clear")])
@@ -367,6 +381,10 @@ impl App {
                 reader.draw(frame, frame.area(), mail);
             }
         }
+
+        if let Some(overlay) = &self.overlay {
+            draw_overlay(frame, overlay);
+        }
     }
 
     fn handle_event(&mut self, event: Event) {
@@ -398,6 +416,10 @@ impl App {
             return;
         }
 
+        if self.handle_overlay_key(key) {
+            return;
+        }
+
         if self.searching {
             match key.code {
                 KeyCode::Enter => self.searching = false,
@@ -423,6 +445,14 @@ impl App {
         }
 
         match key.code {
+            KeyCode::Char('?') => {
+                self.overlay = Some(Overlay::Help);
+                return;
+            }
+            KeyCode::Char(':') => {
+                self.overlay = Some(Overlay::Command(String::new()));
+                return;
+            }
             KeyCode::Char('m') => {
                 self.toggle_read();
                 return;
@@ -821,6 +851,79 @@ impl App {
         }
     }
 
+    fn handle_overlay_key(&mut self, key: KeyEvent) -> bool {
+        let Some(mut overlay) = self.overlay.take() else {
+            return false;
+        };
+        match &mut overlay {
+            Overlay::Help => match key.code {
+                KeyCode::Esc | KeyCode::Char('?') => {}
+                _ => self.overlay = Some(overlay),
+            },
+            Overlay::Command(input) => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Enter => {
+                    let command = input.trim().to_owned();
+                    self.run_command(&command);
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                    self.overlay = Some(overlay);
+                }
+                KeyCode::Char(character)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    input.push(character);
+                    self.overlay = Some(overlay);
+                }
+                _ => self.overlay = Some(overlay),
+            },
+        }
+        true
+    }
+
+    fn run_command(&mut self, command: &str) {
+        match command {
+            "reload" => self.reload(),
+            "filter all" => {
+                self.filter = InboxFilter::All;
+                self.refresh_inbox();
+            }
+            "filter unread" => {
+                self.filter = InboxFilter::Unread;
+                self.refresh_inbox();
+            }
+            "filter starred" => {
+                self.filter = InboxFilter::Starred;
+                self.refresh_inbox();
+            }
+            "compose" => self.start_draft(false),
+            "reply" => self.start_draft(true),
+            "help" => self.overlay = Some(Overlay::Help),
+            "quit" => self.running = false,
+            _ if command.starts_with("open maildir ") => {
+                let path = command.trim_start_matches("open maildir ").trim();
+                if path.is_empty() {
+                    self.notice = Some("Enter a Maildir path.".into());
+                } else {
+                    self.source = MailboxSource::Maildir(PathBuf::from(path));
+                    self.filter = InboxFilter::All;
+                    self.query.clear();
+                    self.undo = None;
+                    self.mailbox_fingerprint = 0;
+                    self.reload();
+                }
+            }
+            "" => {}
+            _ => {
+                self.notice = Some(format!(
+                    "Unknown command: {command}. Press ? to view commands."
+                ));
+            }
+        }
+    }
+
     fn start_draft(&mut self, reply: bool) {
         if matches!(self.source, MailboxSource::Demo) {
             self.notice = Some("Open a Maildir mailbox to save drafts.".into());
@@ -1016,6 +1119,70 @@ fn draw_no_matches(frame: &mut Frame, area: Rect) {
     );
 }
 
+fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
+    let (width, height) = match overlay {
+        Overlay::Help => (58, 19),
+        Overlay::Command(_) => (64, 3),
+    };
+    let screen = frame.area();
+    let area = Rect::new(
+        screen.x + screen.width.saturating_sub(width.min(screen.width)) / 2,
+        screen.y + screen.height.saturating_sub(height.min(screen.height)) / 2,
+        width.min(screen.width),
+        height.min(screen.height),
+    );
+    frame.render_widget(Clear, area);
+    match overlay {
+        Overlay::Help => {
+            let text = [
+                "navigation",
+                "  j/k or arrows  select     tab  switch pane",
+                "  enter          open       esc  close",
+                "",
+                "message actions",
+                "  m  read/unread     s  star/unstar",
+                "  a  archive         d  move to Trash",
+                "  u  undo            r  reply       c  compose",
+                "",
+                "inbox",
+                "  /  search          1/2/3  all/unread/starred",
+                "",
+                "commands",
+                "  :reload                 :filter unread",
+                "  :open maildir PATH      :compose  :reply  :quit",
+            ]
+            .join("\n");
+            frame.render_widget(
+                Paragraph::new(text)
+                    .style(theme::text())
+                    .block(
+                        Block::bordered()
+                            .border_style(theme::border(true))
+                            .title_style(theme::title(true))
+                            .title(" help · esc to close ")
+                            .bg(theme::SURFACE),
+                    )
+                    .wrap(Wrap { trim: false }),
+                area,
+            );
+        }
+        Overlay::Command(input) => {
+            frame.render_widget(
+                Paragraph::new(format!(":{input}_"))
+                    .style(theme::text())
+                    .block(
+                        Block::bordered()
+                            .border_style(theme::border(true))
+                            .title_style(theme::title(true))
+                            .title(" command ")
+                            .bg(theme::SURFACE),
+                    ),
+                area,
+            );
+        }
+    }
+}
+
 fn reader_is_docked(width: u16, reader_open: bool) -> bool {
     reader_open && width >= MIN_DOCK_WIDTH
 }
@@ -1059,7 +1226,9 @@ mod tests {
 
     use crate::mailbox::MailboxSource;
 
-    use super::{MailboxState, draw_mailbox_state, parse_source, reader_is_docked};
+    use super::{
+        MailboxState, Overlay, draw_mailbox_state, draw_overlay, parse_source, reader_is_docked,
+    };
 
     #[test]
     fn docks_readers_only_when_they_fit() {
@@ -1087,12 +1256,33 @@ mod tests {
         assert!(screen.contains("press r to retry"));
     }
 
+    #[test]
+    fn renders_help_and_command_overlays() {
+        assert!(render_overlay(&Overlay::Help).contains("message actions"));
+        assert!(
+            render_overlay(&Overlay::Command("filter unread".into())).contains(":filter unread_")
+        );
+    }
+
     fn render_state(state: &MailboxState) -> String {
         let backend = TestBackend::new(100, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| draw_mailbox_state(frame, frame.area(), state, &MailboxSource::Demo, 2))
             .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    fn render_overlay(overlay: &Overlay) -> String {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw_overlay(frame, overlay)).unwrap();
         terminal
             .backend()
             .buffer()
