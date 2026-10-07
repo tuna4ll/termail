@@ -1,3 +1,4 @@
+mod draft;
 mod mail;
 mod mailbox;
 mod theme;
@@ -8,7 +9,14 @@ use mailbox::{LoadError, LoadReport, MailboxSource, MaildirChange};
 use widgets::reader::Reader;
 use widgets::workspace::Workspace;
 
-use std::{ffi::OsString, io::stdout, path::PathBuf, time::Duration};
+use std::{
+    ffi::OsString,
+    fs,
+    io::stdout,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 
 use crossterm::{
     event::{
@@ -74,6 +82,7 @@ pub struct App {
     undo: Option<UndoAction>,
     notice: Option<String>,
     mailbox_fingerprint: u64,
+    pending_draft: Option<PathBuf>,
 }
 
 struct UndoAction {
@@ -137,6 +146,7 @@ impl App {
             undo: None,
             notice: None,
             mailbox_fingerprint: 0,
+            pending_draft: None,
         };
         app.reload();
         app
@@ -166,6 +176,9 @@ impl App {
                         self.handle_event(event);
                     }
                 }
+            }
+            if let Some(path) = self.pending_draft.take() {
+                terminal = self.edit_draft(path)?;
             }
         }
 
@@ -313,7 +326,13 @@ impl App {
         } else if self.searching {
             status_line(&[("type", "search"), ("enter", "apply"), ("esc", "clear")])
         } else if self.reader.is_some() {
-            status_line(&[("j/k", "scroll"), ("pgup/pgdn", "page"), ("esc", "close")])
+            status_line(&[
+                ("j/k", "scroll"),
+                ("r", "reply"),
+                ("m/s", "read/star"),
+                ("a/d", "archive/trash"),
+                ("esc", "close"),
+            ])
         } else {
             match self.focus {
                 Pane::Inbox => status_line(&[
@@ -323,6 +342,7 @@ impl App {
                     ("1/2/3", "filter"),
                     ("m/s", "read/star"),
                     ("a/d", "archive/trash"),
+                    ("c/r", "compose/reply"),
                     ("enter", "open"),
                     ("q", "quit"),
                 ]),
@@ -423,6 +443,14 @@ impl App {
                 self.move_active_message(false);
                 return;
             }
+            KeyCode::Char('r') => {
+                self.start_draft(true);
+                return;
+            }
+            KeyCode::Char('c') if self.reader.is_some() || self.focus == Pane::Inbox => {
+                self.start_draft(false);
+                return;
+            }
             _ => {}
         }
 
@@ -460,7 +488,7 @@ impl App {
                 };
             }
 
-            (_, KeyCode::Char('r')) => self.reload(),
+            (_, KeyCode::Char('R')) => self.reload(),
 
             (_, KeyCode::Char('/')) if self.focus == Pane::Inbox => self.searching = true,
 
@@ -791,6 +819,63 @@ impl App {
             self.notice = Some("Mailbox changed · refreshing".into());
             self.reload();
         }
+    }
+
+    fn start_draft(&mut self, reply: bool) {
+        if matches!(self.source, MailboxSource::Demo) {
+            self.notice = Some("Open a Maildir mailbox to save drafts.".into());
+            return;
+        }
+        let mail = reply
+            .then(|| self.active_mail_id())
+            .flatten()
+            .and_then(|id| self.mails.iter().find(|mail| mail.id == id));
+        if reply && mail.is_none() {
+            self.notice = Some("Select a message to reply.".into());
+            return;
+        }
+        match draft::create(mail) {
+            Ok(path) => self.pending_draft = Some(path),
+            Err(error) => self.notice = Some(format!("Unable to create draft: {error}")),
+        }
+    }
+
+    fn edit_draft(&mut self, path: PathBuf) -> color_eyre::Result<DefaultTerminal> {
+        execute!(stdout(), DisableMouseCapture)?;
+        ratatui::restore();
+        let result = self.run_editor(&path);
+        let terminal = ratatui::init();
+        execute!(stdout(), EnableMouseCapture)?;
+
+        match result {
+            Ok(()) => {
+                self.notice = Some("Draft saved".into());
+                self.refresh_fingerprint();
+            }
+            Err(error) => {
+                self.notice = Some(format!(
+                    "Unable to save draft: {error}. Draft kept at {}",
+                    path.display()
+                ));
+            }
+        }
+        Ok(terminal)
+    }
+
+    fn run_editor(&self, path: &Path) -> color_eyre::Result<()> {
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
+        let mut parts = editor.split_whitespace();
+        let program = parts
+            .next()
+            .ok_or_else(|| color_eyre::eyre::eyre!("EDITOR is empty"))?;
+        let status = Command::new(program).args(parts).arg(path).status()?;
+        if !status.success() {
+            return Err(color_eyre::eyre::eyre!("editor exited with {status}"));
+        }
+        let contents = fs::read(path)?;
+        self.source.save_draft(&contents)?;
+        fs::remove_file(path)?;
+        Ok(())
     }
 
     fn visible_conversations(&self) -> Vec<usize> {
