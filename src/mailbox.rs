@@ -83,6 +83,15 @@ impl MailboxSource {
         self.move_to(mail, ".Trash")
     }
 
+    pub fn save_draft(&self, contents: &[u8]) -> Result<PathBuf, LoadError> {
+        let Self::Maildir(root) = self else {
+            return Err(LoadError {
+                message: "Open a Maildir mailbox to save drafts.".into(),
+            });
+        };
+        save_draft(root, contents).map_err(Into::into)
+    }
+
     fn set_flag(
         &self,
         mail: &Mail,
@@ -276,6 +285,23 @@ fn mailbox_fingerprint(path: &Path) -> io::Result<u64> {
     Ok(fingerprint)
 }
 
+fn save_draft(root: &Path, contents: &[u8]) -> io::Result<PathBuf> {
+    let folder = root.join(".Drafts");
+    for child in ["cur", "new", "tmp"] {
+        fs::create_dir_all(folder.join(child))?;
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let name = format!("{nonce}.{}.termail", std::process::id());
+    let temporary = folder.join("tmp").join(&name);
+    let destination = folder.join("new").join(name);
+    fs::write(&temporary, contents)?;
+    fs::rename(temporary, &destination)?;
+    Ok(destination)
+}
+
 fn fingerprint_dir(path: &Path, fingerprint: &mut u64) -> io::Result<()> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
@@ -370,6 +396,10 @@ mod tests {
         assert!(source.load().unwrap().mails.is_empty());
         change.undo().unwrap();
         assert_eq!(source.load().unwrap().mails.len(), 1);
+
+        let draft = source.save_draft(b"To: ada@example.com\n\nhello").unwrap();
+        assert!(draft.starts_with(root.join(".Drafts/new")));
+        assert_eq!(fs::read(draft).unwrap(), b"To: ada@example.com\n\nhello");
 
         fs::remove_dir_all(root).unwrap();
     }
