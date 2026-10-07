@@ -444,6 +444,10 @@ impl App {
             return;
         }
 
+        if key.code == KeyCode::Esc && self.notice.take().is_some() {
+            return;
+        }
+
         match key.code {
             KeyCode::Char('?') => {
                 self.overlay = Some(Overlay::Help);
@@ -907,7 +911,7 @@ impl App {
                 if path.is_empty() {
                     self.notice = Some("Enter a Maildir path.".into());
                 } else {
-                    self.source = MailboxSource::Maildir(PathBuf::from(path));
+                    self.source = MailboxSource::Maildir(expand_path(path));
                     self.filter = InboxFilter::All;
                     self.query.clear();
                     self.undo = None;
@@ -1093,6 +1097,8 @@ fn action_line(message: &str, undo: bool) -> Line<'static> {
         spans.push(Span::styled(" u ", theme::keycap()));
         spans.push(Span::styled(" undo", theme::muted()));
     }
+    spans.push(Span::styled(" esc ", theme::keycap()));
+    spans.push(Span::styled(" dismiss", theme::muted()));
     Line::from(spans)
 }
 
@@ -1216,6 +1222,15 @@ fn print_help() {
     println!();
     println!("  --demo          open the built-in mailbox");
     println!("  --maildir PATH  open a Maildir mailbox");
+}
+
+fn expand_path(value: &str) -> PathBuf {
+    if let Some(relative) = value.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(relative);
+    }
+    PathBuf::from(value)
 }
 
 #[cfg(test)]
