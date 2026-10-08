@@ -249,6 +249,12 @@ fn rename_with_flag(path: &Path, flag: char, enabled: bool) -> io::Result<Maildi
         path.parent().unwrap().to_path_buf()
     };
     let after = parent.join(file_name);
+    if after != path && after.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "A message with the target flags already exists.",
+        ));
+    }
     fs::rename(path, &after)?;
     Ok(MaildirChange {
         before: path.to_path_buf(),
@@ -265,11 +271,11 @@ fn move_to_folder(path: &Path, folder: &Path) -> io::Result<MaildirChange> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid Maildir filename."))?;
     let mut after = folder.join("cur").join(file_name);
     if after.exists() {
-        let unique = format!(
-            "{}.termail-{}",
-            file_name.to_string_lossy(),
-            std::process::id()
-        );
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let unique = format!("{}.termail-{nonce}", file_name.to_string_lossy());
         after = folder.join("cur").join(unique);
     }
     fs::rename(path, &after)?;
