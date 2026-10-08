@@ -111,7 +111,7 @@ enum InboxFilter {
 }
 
 enum Overlay {
-    Help,
+    Help { scroll: u16 },
     Command(String),
 }
 
@@ -209,8 +209,8 @@ impl App {
                 &self.source,
                 self.spinner_tick,
             );
-            let hints = if matches!(self.overlay, Some(Overlay::Help)) {
-                status_line(&[("esc", "close help")])
+            let hints = if matches!(self.overlay, Some(Overlay::Help { .. })) {
+                status_line(&[("j/k", "scroll"), ("esc", "close help")])
             } else if matches!(self.overlay, Some(Overlay::Command(_))) {
                 status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
             } else {
@@ -343,8 +343,8 @@ impl App {
             }
         }
 
-        let hints = if matches!(self.overlay, Some(Overlay::Help)) {
-            status_line(&[("esc", "close help")])
+        let hints = if matches!(self.overlay, Some(Overlay::Help { .. })) {
+            status_line(&[("j/k", "scroll"), ("esc", "close help")])
         } else if matches!(self.overlay, Some(Overlay::Command(_))) {
             status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
         } else if let Some(notice) = &self.notice {
@@ -428,7 +428,7 @@ impl App {
         if !matches!(self.mailbox_state, MailboxState::Ready) {
             match (key.modifiers, key.code) {
                 (_, KeyCode::Char('r')) => self.reload(),
-                (_, KeyCode::Char('?')) => self.overlay = Some(Overlay::Help),
+                (_, KeyCode::Char('?')) => self.overlay = Some(Overlay::Help { scroll: 0 }),
                 (_, KeyCode::Char(':')) => {
                     self.overlay = Some(Overlay::Command(String::new()));
                 }
@@ -471,7 +471,7 @@ impl App {
 
         match key.code {
             KeyCode::Char('?') => {
-                self.overlay = Some(Overlay::Help);
+                self.overlay = Some(Overlay::Help { scroll: 0 });
                 return;
             }
             KeyCode::Char(':') => {
@@ -881,8 +881,16 @@ impl App {
             return false;
         };
         match &mut overlay {
-            Overlay::Help => match key.code {
+            Overlay::Help { scroll } => match key.code {
                 KeyCode::Esc | KeyCode::Char('?') => {}
+                KeyCode::Down | KeyCode::Char('j') => {
+                    *scroll = scroll.saturating_add(1).min(14);
+                    self.overlay = Some(overlay);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    *scroll = scroll.saturating_sub(1);
+                    self.overlay = Some(overlay);
+                }
                 _ => self.overlay = Some(overlay),
             },
             Overlay::Command(input) => match key.code {
@@ -925,7 +933,7 @@ impl App {
             }
             "compose" => self.start_draft(false),
             "reply" => self.start_draft(true),
-            "help" => self.overlay = Some(Overlay::Help),
+            "help" => self.overlay = Some(Overlay::Help { scroll: 0 }),
             "quit" => self.running = false,
             _ if command.starts_with("open maildir ") => {
                 let path = command.trim_start_matches("open maildir ").trim();
@@ -1148,7 +1156,7 @@ fn draw_no_matches(frame: &mut Frame, area: Rect) {
 
 fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
     let (width, height) = match overlay {
-        Overlay::Help => (58, 19),
+        Overlay::Help { .. } => (58, 19),
         Overlay::Command(_) => (64, 3),
     };
     let screen = frame.area();
@@ -1160,7 +1168,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
     );
     frame.render_widget(Clear, area);
     match overlay {
-        Overlay::Help => {
+        Overlay::Help { scroll } => {
             let text = [
                 "navigation",
                 "  j/k or arrows  select     tab  switch pane",
@@ -1189,6 +1197,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                             .title(" help · esc to close ")
                             .bg(theme::SURFACE),
                     )
+                    .scroll((*scroll, 0))
                     .wrap(Wrap { trim: false }),
                 area,
             );
@@ -1294,7 +1303,7 @@ mod tests {
 
     #[test]
     fn renders_help_and_command_overlays() {
-        assert!(render_overlay(&Overlay::Help).contains("message actions"));
+        assert!(render_overlay(&Overlay::Help { scroll: 0 }).contains("message actions"));
         assert!(
             render_overlay(&Overlay::Command("filter unread".into())).contains(":filter unread_")
         );
