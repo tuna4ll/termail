@@ -404,6 +404,12 @@ impl App {
     }
 
     fn on_key_event(&mut self, key: KeyEvent) {
+        if key.modifiers == KeyModifiers::CONTROL
+            && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
+        {
+            self.running = false;
+            return;
+        }
         if !matches!(self.mailbox_state, MailboxState::Ready) {
             match (key.modifiers, key.code) {
                 (_, KeyCode::Char('r')) => self.reload(),
