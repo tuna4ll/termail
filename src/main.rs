@@ -209,10 +209,22 @@ impl App {
                 &self.source,
                 self.spinner_tick,
             );
-            frame.render_widget(
-                Paragraph::new(status_line(&[("r", "retry"), ("q", "quit")])),
-                rows[1],
-            );
+            let hints = if matches!(self.overlay, Some(Overlay::Help)) {
+                status_line(&[("esc", "close help")])
+            } else if matches!(self.overlay, Some(Overlay::Command(_))) {
+                status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
+            } else {
+                status_line(&[
+                    ("r", "retry"),
+                    (":", "command"),
+                    ("?", "help"),
+                    ("q", "quit"),
+                ])
+            };
+            frame.render_widget(Paragraph::new(hints), rows[1]);
+            if let Some(overlay) = &self.overlay {
+                draw_overlay(frame, overlay);
+            }
             return;
         }
 
@@ -410,19 +422,22 @@ impl App {
             self.running = false;
             return;
         }
+        if self.handle_overlay_key(key) {
+            return;
+        }
         if !matches!(self.mailbox_state, MailboxState::Ready) {
             match (key.modifiers, key.code) {
                 (_, KeyCode::Char('r')) => self.reload(),
+                (_, KeyCode::Char('?')) => self.overlay = Some(Overlay::Help),
+                (_, KeyCode::Char(':')) => {
+                    self.overlay = Some(Overlay::Command(String::new()));
+                }
                 (_, KeyCode::Char('q'))
                 | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
                     self.running = false;
                 }
                 _ => {}
             }
-            return;
-        }
-
-        if self.handle_overlay_key(key) {
             return;
         }
 
