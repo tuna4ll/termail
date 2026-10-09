@@ -234,14 +234,22 @@ fn rename_with_flag(path: &Path, flag: char, enabled: bool) -> io::Result<Maildi
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid Maildir filename."))?;
-    let (base, current) = file_name.rsplit_once(":2,").unwrap_or((file_name, ""));
+    let (base, current, separator) = if let Some((base, flags)) = file_name.rsplit_once(":2,") {
+        (base, flags, ":2,")
+    } else if let Some((base, flags)) = file_name.rsplit_once("!2,") {
+        (base, flags, "!2,")
+    } else if cfg!(target_os = "windows") {
+        (file_name, "", "!2,")
+    } else {
+        (file_name, "", ":2,")
+    };
     let mut flags: Vec<char> = current.chars().filter(|value| *value != flag).collect();
     if enabled {
         flags.push(flag);
     }
     flags.sort_unstable();
     flags.dedup();
-    let file_name = format!("{base}:2,{}", flags.into_iter().collect::<String>());
+    let file_name = format!("{base}{separator}{}", flags.into_iter().collect::<String>());
     let parent = if enabled && flag == 'S' && path.parent().is_some_and(|dir| dir.ends_with("new"))
     {
         path.parent().unwrap().parent().unwrap().join("cur")
@@ -374,7 +382,7 @@ mod tests {
         fs::create_dir_all(root.join("new")).unwrap();
         fs::create_dir_all(root.join("tmp")).unwrap();
         fs::write(
-            root.join("cur/message:2,FS"),
+            root.join("cur/message!2,FS"),
             b"From: Ada <ada@example.com>\r\nTo: Tuna <tuna@example.com>\r\nSubject: Build ready\r\nMessage-ID: <root@example.com>\r\nDate: Thu, 1 Oct 2026 09:00:00 +0300\r\n\r\nPlease review it.",
         )
         .unwrap();
