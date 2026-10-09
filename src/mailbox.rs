@@ -184,9 +184,6 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
     for folder in FolderIterator::new(path, Some("."))? {
         let folder = folder?;
         let mailbox = folder.name().unwrap_or("INBOX").to_owned();
-        if ["Archive", "Trash", "Drafts"].contains(&mailbox.as_str()) {
-            continue;
-        }
         for message in folder {
             attempted += 1;
             let message = message?;
@@ -349,7 +346,7 @@ fn fingerprint_dir(path: &Path, fingerprint: &mut u64) -> io::Result<()> {
                 .file_name()
                 .and_then(|value| value.to_str())
                 .unwrap_or("");
-            if ["tmp", ".Archive", ".Trash", ".Drafts"].contains(&name) {
+            if name == "tmp" {
                 continue;
             }
             fingerprint_dir(&path, fingerprint)?;
@@ -431,7 +428,10 @@ mod tests {
         assert!(!source.load().unwrap().mails[0].unread);
 
         let change = source.archive(&report.mails[0]).unwrap().unwrap();
-        assert!(source.load().unwrap().mails.is_empty());
+        assert_eq!(
+            source.load().unwrap().mails[0].mailbox.as_deref(),
+            Some("Archive")
+        );
         change.undo().unwrap();
         assert_eq!(source.load().unwrap().mails.len(), 1);
 
