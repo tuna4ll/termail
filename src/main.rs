@@ -1,9 +1,11 @@
+mod config;
 mod draft;
 mod mail;
 mod mailbox;
 mod theme;
 mod widgets;
 
+use config::Config;
 use mail::{Conversation, Mail, group_conversations};
 use mailbox::{LoadError, LoadReport, MailboxSource, MaildirChange};
 use widgets::reader::Reader;
@@ -25,6 +27,7 @@ use crossterm::{
     },
     execute,
 };
+use directories::BaseDirs;
 use futures::StreamExt;
 use ratatui::{
     DefaultTerminal, Frame,
@@ -46,16 +49,21 @@ const READER_WIDTH: u16 = 44;
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
-    let Some(source) = parse_source(std::env::args_os().skip(1))? else {
+    let Some(options) = parse_options(std::env::args_os().skip(1))? else {
         print_help();
         return Ok(());
     };
+    let config = Config::load(options.config_path.as_deref())?;
+    let source = options
+        .source
+        .or_else(|| config.maildir.clone().map(MailboxSource::Maildir))
+        .unwrap_or(MailboxSource::Demo);
 
     let terminal = ratatui::init();
 
     execute!(stdout(), EnableMouseCapture)?;
 
-    let result = App::new(source).run(terminal).await;
+    let result = App::new(source, config).run(terminal).await;
 
     execute!(stdout(), DisableMouseCapture)?;
 
@@ -87,6 +95,7 @@ pub struct App {
     mailbox_fingerprint: u64,
     pending_draft: Option<PathBuf>,
     overlay: Option<Overlay>,
+    config: Config,
 }
 
 struct UndoAction {
@@ -132,7 +141,7 @@ enum Pane {
 }
 
 impl App {
-    pub fn new(source: MailboxSource) -> Self {
+    pub fn new(source: MailboxSource, config: Config) -> Self {
         let (load_tx, load_rx) = mpsc::unbounded_channel();
         let mut app = Self {
             running: false,
@@ -157,6 +166,7 @@ impl App {
             mailbox_fingerprint: 0,
             pending_draft: None,
             overlay: None,
+            config,
         };
         app.reload();
         app
@@ -970,7 +980,7 @@ impl App {
             self.notice = Some("Select a message to reply.".into());
             return;
         }
-        match draft::create(mail) {
+        match draft::create(mail, self.config.identity().as_deref()) {
             Ok(path) => self.pending_draft = Some(path),
             Err(error) => self.notice = Some(format!("Unable to create draft: {error}")),
         }
@@ -999,12 +1009,11 @@ impl App {
     }
 
     fn run_editor(&self, path: &Path) -> color_eyre::Result<()> {
-        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
-        let mut parts = editor.split_whitespace();
-        let program = parts
-            .next()
-            .ok_or_else(|| color_eyre::eyre::eyre!("EDITOR is empty"))?;
-        let status = Command::new(program).args(parts).arg(path).status()?;
+        let command = self.config.editor_command();
+        let (program, arguments) = command
+            .split_first()
+            .ok_or_else(|| color_eyre::eyre::eyre!("editor command is empty"))?;
+        let status = Command::new(program).args(arguments).arg(path).status()?;
         if !status.success() {
             return Err(color_eyre::eyre::eyre!("editor exited with {status}"));
         }
@@ -1223,11 +1232,17 @@ fn reader_is_docked(width: u16, reader_open: bool) -> bool {
     reader_open && width >= MIN_DOCK_WIDTH
 }
 
-fn parse_source(
+struct CliOptions {
+    source: Option<MailboxSource>,
+    config_path: Option<PathBuf>,
+}
+
+fn parse_options(
     args: impl IntoIterator<Item = OsString>,
-) -> color_eyre::Result<Option<MailboxSource>> {
+) -> color_eyre::Result<Option<CliOptions>> {
     let mut args = args.into_iter();
-    let mut source = MailboxSource::Demo;
+    let mut source = None;
+    let mut config_path = None;
 
     while let Some(argument) = args.next() {
         match argument.to_str() {
@@ -1235,30 +1250,40 @@ fn parse_source(
                 let path = args
                     .next()
                     .ok_or_else(|| color_eyre::eyre::eyre!("--maildir needs a path"))?;
-                source = MailboxSource::Maildir(PathBuf::from(path));
+                source = Some(MailboxSource::Maildir(PathBuf::from(path)));
             }
-            Some("--demo") => source = MailboxSource::Demo,
+            Some("--config") => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| color_eyre::eyre::eyre!("--config needs a path"))?;
+                config_path = Some(PathBuf::from(path));
+            }
+            Some("--demo") => source = Some(MailboxSource::Demo),
             Some("--help" | "-h") => return Ok(None),
             Some(value) => return Err(color_eyre::eyre::eyre!("unknown option: {value}")),
             None => return Err(color_eyre::eyre::eyre!("option is not valid utf-8")),
         }
     }
 
-    Ok(Some(source))
+    Ok(Some(CliOptions {
+        source,
+        config_path,
+    }))
 }
 
 fn print_help() {
-    println!("termail [--demo | --maildir PATH]");
+    println!("termail [--config PATH] [--demo | --maildir PATH]");
     println!();
     println!("  --demo          open the built-in mailbox");
     println!("  --maildir PATH  open a Maildir mailbox");
+    println!("  --config PATH   load a config file");
 }
 
 fn expand_path(value: &str) -> PathBuf {
     if let Some(relative) = value.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME")
+        && let Some(base) = BaseDirs::new()
     {
-        return PathBuf::from(home).join(relative);
+        return base.home_dir().join(relative);
     }
     PathBuf::from(value)
 }
@@ -1272,7 +1297,7 @@ mod tests {
     use crate::mailbox::MailboxSource;
 
     use super::{
-        MailboxState, Overlay, draw_mailbox_state, draw_overlay, parse_source, reader_is_docked,
+        MailboxState, Overlay, draw_mailbox_state, draw_overlay, parse_options, reader_is_docked,
     };
 
     #[test]
@@ -1284,11 +1309,14 @@ mod tests {
 
     #[test]
     fn reads_maildir_source_from_arguments() {
-        let source = parse_source([OsString::from("--maildir"), OsString::from("/tmp/mail")])
+        let options = parse_options([OsString::from("--maildir"), OsString::from("/tmp/mail")])
             .unwrap()
             .unwrap();
 
-        assert_eq!(source, MailboxSource::Maildir(PathBuf::from("/tmp/mail")));
+        assert_eq!(
+            options.source,
+            Some(MailboxSource::Maildir(PathBuf::from("/tmp/mail")))
+        );
     }
 
     #[test]

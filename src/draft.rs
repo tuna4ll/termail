@@ -6,23 +6,27 @@ use std::{
 
 use crate::mail::Mail;
 
-pub fn create(reply_to: Option<&Mail>) -> io::Result<PathBuf> {
+pub fn create(reply_to: Option<&Mail>, identity: Option<&str>) -> io::Result<PathBuf> {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
     let path =
         std::env::temp_dir().join(format!("termail-draft-{}-{nonce}.eml", std::process::id()));
-    fs::write(&path, template(reply_to))?;
+    fs::write(&path, template(reply_to, identity))?;
     Ok(path)
 }
 
-pub fn template(reply_to: Option<&Mail>) -> String {
+pub fn template(reply_to: Option<&Mail>, identity: Option<&str>) -> String {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
     let mut headers = Vec::new();
+
+    if let Some(identity) = identity {
+        headers.push(format!("From: {}", one_line(identity)));
+    }
 
     if let Some(mail) = reply_to {
         let subject = if mail.subject.to_lowercase().starts_with("re:") {
@@ -78,8 +82,9 @@ mod tests {
             None,
         )
         .with_references(&["root@example.com"]);
-        let draft = template(Some(&mail));
+        let draft = template(Some(&mail), Some("Tuna <tuna@example.com>"));
 
+        assert!(draft.contains("From: Tuna <tuna@example.com>"));
         assert!(draft.contains("To: Ada <ada@example.com>"));
         assert!(draft.contains("Subject: Re: Update"));
         assert!(draft.contains("In-Reply-To: <first@example.com>"));
