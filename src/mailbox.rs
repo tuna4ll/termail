@@ -89,7 +89,25 @@ impl MailboxSource {
                 message: "Open a Maildir mailbox to save drafts.".into(),
             });
         };
-        save_draft(root, contents).map_err(Into::into)
+        save_message(root, ".Drafts", "new", contents, "").map_err(Into::into)
+    }
+
+    pub fn save_outbox(&self, contents: &[u8]) -> Result<PathBuf, LoadError> {
+        let Self::Maildir(root) = self else {
+            return Err(LoadError {
+                message: "Open a Maildir mailbox to queue messages.".into(),
+            });
+        };
+        save_message(root, ".Outbox", "new", contents, "").map_err(Into::into)
+    }
+
+    pub fn save_sent(&self, contents: &[u8]) -> Result<PathBuf, LoadError> {
+        let Self::Maildir(root) = self else {
+            return Err(LoadError {
+                message: "Open a Maildir mailbox to save sent messages.".into(),
+            });
+        };
+        save_message(root, ".Sent", "cur", contents, "!2,S").map_err(Into::into)
     }
 
     fn set_flag(
@@ -299,8 +317,14 @@ fn mailbox_fingerprint(path: &Path) -> io::Result<u64> {
     Ok(fingerprint)
 }
 
-fn save_draft(root: &Path, contents: &[u8]) -> io::Result<PathBuf> {
-    let folder = root.join(".Drafts");
+fn save_message(
+    root: &Path,
+    folder: &str,
+    location: &str,
+    contents: &[u8],
+    suffix: &str,
+) -> io::Result<PathBuf> {
+    let folder = root.join(folder);
     for child in ["cur", "new", "tmp"] {
         fs::create_dir_all(folder.join(child))?;
     }
@@ -308,9 +332,9 @@ fn save_draft(root: &Path, contents: &[u8]) -> io::Result<PathBuf> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let name = format!("{nonce}.{}.termail", std::process::id());
+    let name = format!("{nonce}.{}.termail{suffix}", std::process::id());
     let temporary = folder.join("tmp").join(&name);
-    let destination = folder.join("new").join(name);
+    let destination = folder.join(location).join(name);
     fs::write(&temporary, contents)?;
     fs::rename(temporary, &destination)?;
     Ok(destination)
