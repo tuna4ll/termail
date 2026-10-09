@@ -2,6 +2,7 @@ mod config;
 mod draft;
 mod mail;
 mod mailbox;
+mod sender;
 mod theme;
 mod widgets;
 
@@ -122,6 +123,7 @@ enum InboxFilter {
 enum Overlay {
     Help { scroll: u16 },
     Command(String),
+    DraftReady(PathBuf),
 }
 
 impl InboxFilter {
@@ -223,6 +225,8 @@ impl App {
                 status_line(&[("j/k", "scroll"), ("esc", "close help")])
             } else if matches!(self.overlay, Some(Overlay::Command(_))) {
                 status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
+            } else if matches!(self.overlay, Some(Overlay::DraftReady(_))) {
+                status_line(&[("s", "send"), ("d", "save draft"), ("esc", "keep temp")])
             } else {
                 status_line(&[
                     ("r", "retry"),
@@ -357,6 +361,8 @@ impl App {
             status_line(&[("j/k", "scroll"), ("esc", "close help")])
         } else if matches!(self.overlay, Some(Overlay::Command(_))) {
             status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
+        } else if matches!(self.overlay, Some(Overlay::DraftReady(_))) {
+            status_line(&[("s", "send"), ("d", "save draft"), ("esc", "keep temp")])
         } else if let Some(notice) = &self.notice {
             action_line(notice, self.undo.is_some())
         } else if self.searching {
@@ -922,6 +928,14 @@ impl App {
                 }
                 _ => self.overlay = Some(overlay),
             },
+            Overlay::DraftReady(path) => match key.code {
+                KeyCode::Char('s') => self.finish_draft(path.clone(), true),
+                KeyCode::Char('d') => self.finish_draft(path.clone(), false),
+                KeyCode::Esc => {
+                    self.notice = Some(format!("Draft kept at {}", path.display()));
+                }
+                _ => self.overlay = Some(overlay),
+            },
         }
         true
     }
@@ -995,8 +1009,8 @@ impl App {
 
         match result {
             Ok(()) => {
-                self.notice = Some("Draft saved".into());
-                self.refresh_fingerprint();
+                self.notice = None;
+                self.overlay = Some(Overlay::DraftReady(path));
             }
             Err(error) => {
                 self.notice = Some(format!(
@@ -1017,10 +1031,60 @@ impl App {
         if !status.success() {
             return Err(color_eyre::eyre::eyre!("editor exited with {status}"));
         }
-        let contents = fs::read(path)?;
-        self.source.save_draft(&contents)?;
-        fs::remove_file(path)?;
         Ok(())
+    }
+
+    fn finish_draft(&mut self, path: PathBuf, send: bool) {
+        let result = fs::read(&path).map_err(color_eyre::Report::from);
+        let Ok(contents) = result else {
+            self.notice = Some(format!(
+                "Unable to read draft. Draft kept at {}",
+                path.display()
+            ));
+            return;
+        };
+        if send {
+            match sender::send(&self.config.send_command, &contents) {
+                Ok(()) => match self.source.save_sent(&contents) {
+                    Ok(_) => {
+                        let _ = fs::remove_file(&path);
+                        self.notice = Some("Message sent".into());
+                    }
+                    Err(error) => {
+                        self.notice = Some(format!(
+                            "Message sent, but no Sent copy was saved: {error}. Draft kept at {}",
+                            path.display()
+                        ));
+                    }
+                },
+                Err(error) => match self.source.save_outbox(&contents) {
+                    Ok(_) => {
+                        let _ = fs::remove_file(&path);
+                        self.notice = Some(format!("Send failed: {error}. Queued in Outbox."));
+                    }
+                    Err(queue_error) => {
+                        self.notice = Some(format!(
+                            "Send failed: {error}. Unable to queue: {queue_error}. Draft kept at {}",
+                            path.display()
+                        ));
+                    }
+                },
+            }
+        } else {
+            match self.source.save_draft(&contents) {
+                Ok(_) => {
+                    let _ = fs::remove_file(&path);
+                    self.notice = Some("Draft saved".into());
+                }
+                Err(error) => {
+                    self.notice = Some(format!(
+                        "Unable to save draft: {error}. Draft kept at {}",
+                        path.display()
+                    ));
+                }
+            }
+        }
+        self.refresh_fingerprint();
     }
 
     fn visible_conversations(&self) -> Vec<usize> {
@@ -1167,6 +1231,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
     let (width, height) = match overlay {
         Overlay::Help { .. } => (58, 19),
         Overlay::Command(_) => (64, 3),
+        Overlay::DraftReady(_) => (58, 7),
     };
     let screen = frame.area();
     let area = Rect::new(
@@ -1222,6 +1287,24 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                             .title(" command ")
                             .bg(theme::SURFACE),
                     ),
+                area,
+            );
+        }
+        Overlay::DraftReady(_) => {
+            frame.render_widget(
+                Paragraph::new(
+                    "Draft is ready\n\n s  Send message     d  Save draft     esc  Keep temporary file",
+                )
+                .style(theme::text())
+                .alignment(Alignment::Center)
+                .block(
+                    Block::bordered()
+                        .border_style(theme::border(true))
+                        .title_style(theme::title(true))
+                        .title(" choose an action ")
+                        .bg(theme::SURFACE),
+                )
+                .wrap(Wrap { trim: true }),
                 area,
             );
         }
