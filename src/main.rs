@@ -97,6 +97,7 @@ pub struct App {
     pending_draft: Option<PathBuf>,
     overlay: Option<Overlay>,
     config: Config,
+    active_folder: String,
 }
 
 struct UndoAction {
@@ -121,9 +122,22 @@ enum InboxFilter {
 }
 
 enum Overlay {
-    Help { scroll: u16 },
+    Help {
+        scroll: u16,
+    },
     Command(String),
     DraftReady(PathBuf),
+    Folders {
+        selected: usize,
+        items: Vec<FolderItem>,
+    },
+}
+
+#[derive(Clone)]
+struct FolderItem {
+    name: String,
+    unread: usize,
+    total: usize,
 }
 
 impl InboxFilter {
@@ -169,6 +183,7 @@ impl App {
             pending_draft: None,
             overlay: None,
             config,
+            active_folder: "INBOX".into(),
         };
         app.reload();
         app
@@ -227,6 +242,8 @@ impl App {
                 status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
             } else if matches!(self.overlay, Some(Overlay::DraftReady(_))) {
                 status_line(&[("s", "send"), ("d", "save draft"), ("esc", "keep temp")])
+            } else if matches!(self.overlay, Some(Overlay::Folders { .. })) {
+                status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
             } else {
                 status_line(&[
                     ("r", "retry"),
@@ -299,11 +316,11 @@ impl App {
         } else if self.filter != InboxFilter::All {
             format!(" inbox • {} ", self.filter.label())
         } else if self.skipped > 0 {
-            format!(" inbox • {} skipped ", self.skipped)
+            format!(" {} • {} skipped ", self.active_folder, self.skipped)
         } else if inbox_focused {
-            " inbox • active ".into()
+            format!(" {} • active ", self.active_folder)
         } else {
-            " inbox ".into()
+            format!(" {} ", self.active_folder)
         };
         let list = List::new(items)
             .style(theme::text())
@@ -363,6 +380,8 @@ impl App {
             status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
         } else if matches!(self.overlay, Some(Overlay::DraftReady(_))) {
             status_line(&[("s", "send"), ("d", "save draft"), ("esc", "keep temp")])
+        } else if matches!(self.overlay, Some(Overlay::Folders { .. })) {
+            status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
         } else if let Some(notice) = &self.notice {
             action_line(notice, self.undo.is_some())
         } else if self.searching {
@@ -379,6 +398,7 @@ impl App {
             match self.focus {
                 Pane::Inbox => status_line(&[
                     ("tab", "thread map"),
+                    ("g", "folders"),
                     ("j/k", "select"),
                     ("/", "search"),
                     ("1/2/3", "filter"),
@@ -492,6 +512,10 @@ impl App {
             }
             KeyCode::Char(':') => {
                 self.overlay = Some(Overlay::Command(String::new()));
+                return;
+            }
+            KeyCode::Char('g') => {
+                self.open_folders();
                 return;
             }
             KeyCode::Char('m') => {
@@ -636,7 +660,13 @@ impl App {
             return;
         };
         if let Some(workspace) = &mut self.workspace {
-            workspace.show_conversation(&self.mails, &mail_id);
+            let active_mails: Vec<Mail> = self
+                .mails
+                .iter()
+                .filter(|mail| mail_folder(mail) == self.active_folder)
+                .cloned()
+                .collect();
+            workspace.show_conversation(&active_mails, &mail_id);
         }
     }
 
@@ -697,6 +727,16 @@ impl App {
                 let active_mail_id = self.active_mail_id();
                 self.mails = report.mails;
                 self.skipped = report.skipped.len();
+                let folders = self.folder_items();
+                if !folders
+                    .iter()
+                    .any(|folder| folder.name == self.active_folder)
+                {
+                    self.active_folder = folders
+                        .first()
+                        .map(|folder| folder.name.clone())
+                        .unwrap_or_else(|| "INBOX".into());
+                }
                 self.rebuild_mailbox(active_mail_id.as_deref());
                 if self.reader.as_ref().is_some_and(|reader| {
                     !self.mails.iter().any(|mail| mail.id == reader.mail_id())
@@ -834,7 +874,10 @@ impl App {
         };
         match result {
             Ok(change) => {
-                self.mails.remove(index);
+                if let Some(change) = &change {
+                    self.mails[index].source_path = Some(change.after_path().to_path_buf());
+                }
+                self.mails[index].mailbox = Some(if archive { "Archive" } else { "Trash" }.into());
                 self.reader = None;
                 let label = if archive {
                     "Archived message"
@@ -855,7 +898,13 @@ impl App {
     }
 
     fn rebuild_mailbox(&mut self, mail_id: Option<&str>) {
-        self.conversations = group_conversations(&self.mails);
+        let active_mails: Vec<Mail> = self
+            .mails
+            .iter()
+            .filter(|mail| mail_folder(mail) == self.active_folder)
+            .cloned()
+            .collect();
+        self.conversations = group_conversations(&active_mails);
         let visible = self.visible_conversations();
         self.selected = mail_id
             .and_then(|mail_id| {
@@ -871,7 +920,42 @@ impl App {
         self.workspace = self
             .selected_conversation()
             .and_then(Conversation::latest_mail_id)
-            .map(|mail_id| Workspace::new(&self.mails, mail_id));
+            .map(|mail_id| Workspace::new(&active_mails, mail_id));
+    }
+
+    fn folder_items(&self) -> Vec<FolderItem> {
+        let mut names: Vec<String> = self
+            .mails
+            .iter()
+            .map(|mail| mail_folder(mail).into())
+            .collect();
+        names.sort();
+        names.dedup();
+        if let Some(position) = names.iter().position(|name| name == "INBOX") {
+            names.swap(0, position);
+        }
+        names
+            .into_iter()
+            .map(|name| {
+                let messages = self.mails.iter().filter(|mail| mail_folder(mail) == name);
+                let total = messages.clone().count();
+                let unread = messages.filter(|mail| mail.unread).count();
+                FolderItem {
+                    name,
+                    unread,
+                    total,
+                }
+            })
+            .collect()
+    }
+
+    fn open_folders(&mut self) {
+        let items = self.folder_items();
+        let selected = items
+            .iter()
+            .position(|folder| folder.name == self.active_folder)
+            .unwrap_or_default();
+        self.overlay = Some(Overlay::Folders { selected, items });
     }
 
     fn refresh_fingerprint(&mut self) {
@@ -933,6 +1017,25 @@ impl App {
                 KeyCode::Char('d') => self.finish_draft(path.clone(), false),
                 KeyCode::Esc => {
                     self.notice = Some(format!("Draft kept at {}", path.display()));
+                }
+                _ => self.overlay = Some(overlay),
+            },
+            Overlay::Folders { selected, items } => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Down | KeyCode::Char('j') if *selected + 1 < items.len() => {
+                    *selected += 1;
+                    self.overlay = Some(overlay);
+                }
+                KeyCode::Up | KeyCode::Char('k') if *selected > 0 => {
+                    *selected -= 1;
+                    self.overlay = Some(overlay);
+                }
+                KeyCode::Enter => {
+                    if let Some(folder) = items.get(*selected) {
+                        self.active_folder = folder.name.clone();
+                        self.reader = None;
+                        self.rebuild_mailbox(None);
+                    }
                 }
                 _ => self.overlay = Some(overlay),
             },
@@ -1204,6 +1307,10 @@ fn action_line(message: &str, undo: bool) -> Line<'static> {
     Line::from(spans)
 }
 
+fn mail_folder(mail: &Mail) -> &str {
+    mail.mailbox.as_deref().unwrap_or("INBOX")
+}
+
 fn draw_no_matches(frame: &mut Frame, area: Rect) {
     let block = Block::bordered()
         .border_style(theme::border(false))
@@ -1232,6 +1339,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
         Overlay::Help { .. } => (58, 19),
         Overlay::Command(_) => (64, 3),
         Overlay::DraftReady(_) => (58, 7),
+        Overlay::Folders { items, .. } => (44, (items.len() as u16 + 2).min(18)),
     };
     let screen = frame.area();
     let area = Rect::new(
@@ -1254,7 +1362,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                 "  u  undo            r  reply       c  compose",
                 "",
                 "inbox",
-                "  /  search          1/2/3  all/unread/starred",
+                "  /  search      g  folders      1/2/3  filters",
                 "",
                 "commands",
                 "  :reload                 :filter unread",
@@ -1307,6 +1415,30 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                 .wrap(Wrap { trim: true }),
                 area,
             );
+        }
+        Overlay::Folders { selected, items } => {
+            let rows: Vec<ListItem> = items
+                .iter()
+                .map(|folder| {
+                    ListItem::new(format!(
+                        "{:<20} {:>3} unread  {:>3} total",
+                        folder.name, folder.unread, folder.total
+                    ))
+                })
+                .collect();
+            let list = List::new(rows)
+                .style(theme::text())
+                .highlight_symbol("▌ ")
+                .highlight_style(theme::selection())
+                .block(
+                    Block::bordered()
+                        .border_style(theme::border(true))
+                        .title_style(theme::title(true))
+                        .title(" folders ")
+                        .bg(theme::SURFACE),
+                );
+            let mut state = ListState::default().with_selected(Some(*selected));
+            frame.render_stateful_widget(list, area, &mut state);
         }
     }
 }
