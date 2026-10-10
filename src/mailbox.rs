@@ -1,15 +1,17 @@
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{BTreeMap, hash_map::DefaultHasher},
     fmt, fs,
     hash::{Hash, Hasher},
     io,
     path::{Path, PathBuf},
 };
 
+use directories::ProjectDirs;
 use mail_parser::{
     Address, MessageParser,
     mailbox::maildir::{Flag, FolderIterator},
 };
+use serde::{Deserialize, Serialize};
 
 use crate::mail::{Mail, demo_mails};
 
@@ -35,6 +37,14 @@ pub struct LoadError {
 pub struct MaildirChange {
     before: PathBuf,
     after: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct CachedMessage {
+    internal_date: u64,
+    length: usize,
+    digest: u64,
+    mail: Mail,
 }
 
 impl MailboxSource {
@@ -184,6 +194,8 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
     let mut mails = Vec::new();
     let mut skipped = Vec::new();
     let mut attempted = 0;
+    let cache = load_cache(path).unwrap_or_default();
+    let mut next_cache = BTreeMap::new();
 
     for folder in FolderIterator::new(path, Some("."))? {
         let folder = folder?;
@@ -191,6 +203,16 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
         for message in folder {
             attempted += 1;
             let message = message?;
+            let cache_key = message.path().to_string_lossy().into_owned();
+            if let Some(cached) = cache.get(&cache_key)
+                && cached.internal_date == message.internal_date()
+                && cached.length == message.contents().len()
+                && cached.digest == content_digest(message.contents())
+            {
+                mails.push(cached.mail.clone());
+                next_cache.insert(cache_key, cached.clone());
+                continue;
+            }
             let Some(parsed) = MessageParser::default().parse(message.contents()) else {
                 skipped.push(message.path().display().to_string());
                 continue;
@@ -220,7 +242,7 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
             let unread = !message.flags().contains(&Flag::Seen);
             let starred = message.flags().contains(&Flag::Flagged);
 
-            mails.push(Mail {
+            let mail = Mail {
                 id,
                 from,
                 to,
@@ -236,16 +258,71 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
                 attachment_count: parsed.attachments().count(),
                 source_path: Some(message.path().to_path_buf()),
                 mailbox: Some(mailbox.clone()),
-            });
+            };
+            next_cache.insert(
+                cache_key,
+                CachedMessage {
+                    internal_date: message.internal_date(),
+                    length: message.contents().len(),
+                    digest: content_digest(message.contents()),
+                    mail: mail.clone(),
+                },
+            );
+            mails.push(mail);
         }
     }
 
     mails.sort_by_key(|mail| mail.timestamp.unwrap_or_default());
+    let _ = save_cache(path, &next_cache);
     Ok(LoadReport {
         mails,
         skipped,
         attempted,
     })
+}
+
+fn cache_path(maildir: &Path) -> Option<PathBuf> {
+    let mut hasher = DefaultHasher::new();
+    maildir.hash(&mut hasher);
+    ProjectDirs::from("com", "tunakilic", "termail").map(|dirs| {
+        dirs.cache_dir()
+            .join(format!("maildir-{:016x}.json", hasher.finish()))
+    })
+}
+
+fn load_cache(maildir: &Path) -> io::Result<BTreeMap<String, CachedMessage>> {
+    let Some(path) = cache_path(maildir) else {
+        return Ok(BTreeMap::new());
+    };
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+    let contents = fs::read(path)?;
+    serde_json::from_slice(&contents)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+fn save_cache(maildir: &Path, cache: &BTreeMap<String, CachedMessage>) -> io::Result<()> {
+    let Some(path) = cache_path(maildir) else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension("json.tmp");
+    let contents = serde_json::to_vec(cache)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    fs::write(&temporary, contents)?;
+    if path.exists() {
+        fs::remove_file(&path)?;
+    }
+    fs::rename(temporary, path)
+}
+
+fn content_digest(contents: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    contents.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn rename_with_flag(path: &Path, flag: char, enabled: bool) -> io::Result<MaildirChange> {

@@ -1,6 +1,8 @@
 use std::{collections::HashSet, path::PathBuf};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Mail {
     pub id: String,
     pub from: String,
