@@ -933,6 +933,13 @@ impl App {
             .iter()
             .map(|mail| mail_folder(mail).into())
             .collect();
+        if matches!(self.source, MailboxSource::Maildir(_)) {
+            names.extend(
+                ["INBOX", "Drafts", "Sent", "Archive", "Trash", "Outbox"]
+                    .into_iter()
+                    .map(str::to_owned),
+            );
+        }
         names.sort();
         names.dedup();
         if let Some(position) = names.iter().position(|name| name == "INBOX") {
@@ -1384,7 +1391,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
         Overlay::Help { .. } => (58, 19),
         Overlay::Command(_) => (64, 3),
         Overlay::DraftReady(_) => (58, 7),
-        Overlay::Folders { items, .. } => (44, (items.len() as u16 + 2).min(18)),
+        Overlay::Folders { items, .. } => (50, (items.len() as u16 + 2).min(18)),
     };
     let screen = frame.area();
     let area = Rect::new(
