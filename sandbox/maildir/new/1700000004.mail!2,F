@@ -1,0 +1,9 @@
+From: Build Bot <builds@termail.test>
+To: Tuna Test <tuna@termail.test>
+Subject: Nightly build passed
+Message-ID: <nightly-42@termail.test>
+Date: Fri, 25 Sep 2026 23:40:00 +0300
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+All 19 checks passed on linux, windows and macos.

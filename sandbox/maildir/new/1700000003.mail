@@ -1,0 +1,11 @@
+From: Ada Lovelace <ada@termail.test>
+To: Tuna Test <tuna@termail.test>
+Subject: Re: Portable release plan
+Message-ID: <release-branch@termail.test>
+In-Reply-To: <release-root@termail.test>
+References: <release-root@termail.test>
+Date: Fri, 25 Sep 2026 11:28:00 +0300
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Great. I added a separate branch for the packaging checklist.

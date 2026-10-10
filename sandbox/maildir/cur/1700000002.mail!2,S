@@ -1,0 +1,11 @@
+From: Tuna Test <tuna@termail.test>
+To: Ada Lovelace <ada@termail.test>
+Subject: Re: Portable release plan
+Message-ID: <release-reply@termail.test>
+In-Reply-To: <release-root@termail.test>
+References: <release-root@termail.test>
+Date: Fri, 25 Sep 2026 10:04:00 +0300
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Linux and Windows look good. I am testing the macOS paths now.

@@ -1,0 +1,13 @@
+From: Ada Lovelace <ada@termail.test>
+To: Tuna Test <tuna@termail.test>
+Subject: Portable release plan
+Message-ID: <release-root@termail.test>
+Date: Fri, 25 Sep 2026 09:12:00 +0300
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hi Tuna,
+
+The Linux build is ready. Could you check the Windows and macOS notes?
+
+Ada

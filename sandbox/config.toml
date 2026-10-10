@@ -1,0 +1,4 @@
+name = "Tuna Test"
+email = "tuna@termail.test"
+maildir = "maildir"
+send_command = ["termail-test-sink", "sandbox/sent.log"]
