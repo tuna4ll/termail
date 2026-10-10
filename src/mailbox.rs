@@ -83,6 +83,10 @@ impl MailboxSource {
         self.move_to(mail, ".Trash")
     }
 
+    pub fn mark_sent(&self, mail: &Mail) -> Result<Option<MaildirChange>, LoadError> {
+        self.move_to(mail, ".Sent")
+    }
+
     pub fn save_draft(&self, contents: &[u8]) -> Result<PathBuf, LoadError> {
         let Self::Maildir(root) = self else {
             return Err(LoadError {
