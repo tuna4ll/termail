@@ -518,6 +518,10 @@ impl App {
                 self.open_folders();
                 return;
             }
+            KeyCode::Char('x') if self.active_folder == "Outbox" => {
+                self.retry_outbox();
+                return;
+            }
             KeyCode::Char('m') => {
                 self.toggle_read();
                 return;
@@ -958,6 +962,47 @@ impl App {
         self.overlay = Some(Overlay::Folders { selected, items });
     }
 
+    fn retry_outbox(&mut self) {
+        let Some(mail_id) = self.active_mail_id() else {
+            return;
+        };
+        let Some(index) = self.mails.iter().position(|mail| mail.id == mail_id) else {
+            return;
+        };
+        let Some(path) = self.mails[index].source_path.as_ref() else {
+            self.notice = Some("Queued message has no Maildir path.".into());
+            return;
+        };
+        let contents = match fs::read(path) {
+            Ok(contents) => contents,
+            Err(error) => {
+                self.notice = Some(format!("Unable to read queued message: {error}"));
+                return;
+            }
+        };
+        if let Err(error) = sender::send(&self.config.send_command, &contents) {
+            self.notice = Some(format!("Send failed: {error}. Message remains in Outbox."));
+            return;
+        }
+        match self.source.mark_sent(&self.mails[index]) {
+            Ok(change) => {
+                if let Some(change) = change {
+                    self.mails[index].source_path = Some(change.after_path().to_path_buf());
+                }
+                self.mails[index].mailbox = Some("Sent".into());
+                self.reader = None;
+                self.notice = Some("Queued message sent".into());
+                self.refresh_fingerprint();
+                self.rebuild_mailbox(None);
+            }
+            Err(error) => {
+                self.notice = Some(format!(
+                    "Message sent, but unable to move it to Sent: {error}"
+                ));
+            }
+        }
+    }
+
     fn refresh_fingerprint(&mut self) {
         if let Ok(fingerprint) = self.source.fingerprint() {
             self.mailbox_fingerprint = fingerprint;
@@ -1360,6 +1405,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                 "  m  read/unread     s  star/unstar",
                 "  a  archive         d  move to Trash",
                 "  u  undo            r  reply       c  compose",
+                "  x  retry selected Outbox message",
                 "",
                 "inbox",
                 "  /  search      g  folders      1/2/3  filters",
