@@ -343,7 +343,12 @@ impl App {
                 Pane::Inbox => frame.render_stateful_widget(list, rows[0], &mut list_state),
                 Pane::Workspace => {
                     if visible.is_empty() {
-                        draw_no_matches(frame, rows[0]);
+                        draw_no_matches(
+                            frame,
+                            rows[0],
+                            &self.active_folder,
+                            self.conversations.is_empty(),
+                        );
                     } else if let Some(workspace) = &mut self.workspace {
                         workspace.draw(frame, rows[0], workspace_focused);
                     }
@@ -365,7 +370,12 @@ impl App {
                 .split(rows[0]);
             frame.render_stateful_widget(list, areas[0], &mut list_state);
             if visible.is_empty() {
-                draw_no_matches(frame, areas[1]);
+                draw_no_matches(
+                    frame,
+                    areas[1],
+                    &self.active_folder,
+                    self.conversations.is_empty(),
+                );
             } else if let Some(workspace) = &mut self.workspace {
                 workspace.draw(frame, areas[1], workspace_focused);
             }
@@ -1363,20 +1373,23 @@ fn mail_folder(mail: &Mail) -> &str {
     mail.mailbox.as_deref().unwrap_or("INBOX")
 }
 
-fn draw_no_matches(frame: &mut Frame, area: Rect) {
+fn draw_no_matches(frame: &mut Frame, area: Rect, folder: &str, folder_empty: bool) {
     let block = Block::bordered()
         .border_style(theme::border(false))
         .title_style(theme::title(false))
         .title(" workspace ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    let message = if folder_empty {
+        format!("No messages in {folder}\n\nPress g to choose another folder.")
+    } else {
+        "No matching conversations\n\nChange the filter or press esc to clear search.".into()
+    };
     frame.render_widget(
-        Paragraph::new(
-            "No matching conversations\n\nChange the filter or press esc to clear search.",
-        )
-        .style(theme::muted())
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: true }),
+        Paragraph::new(message)
+            .style(theme::muted())
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true }),
         Rect::new(
             inner.x,
             inner.y + inner.height.saturating_sub(3) / 2,
