@@ -7,7 +7,7 @@ mod theme;
 mod widgets;
 
 use config::Config;
-use mail::{Conversation, Mail, group_conversations};
+use mail::{Attachment, Conversation, Mail, group_conversations};
 use mailbox::{LoadError, LoadReport, MailboxSource, MaildirChange};
 use widgets::reader::Reader;
 use widgets::workspace::Workspace;
@@ -135,6 +135,10 @@ enum Overlay {
         selected: usize,
         items: Vec<String>,
     },
+    Attachments {
+        selected: usize,
+        items: Vec<Attachment>,
+    },
 }
 
 #[derive(Clone)]
@@ -250,6 +254,8 @@ impl App {
                 status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
             } else if matches!(self.overlay, Some(Overlay::Links { .. })) {
                 status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
+            } else if matches!(self.overlay, Some(Overlay::Attachments { .. })) {
+                status_line(&[("j/k", "select"), ("s", "save"), ("o", "open")])
             } else {
                 status_line(&[
                     ("r", "retry"),
@@ -400,6 +406,8 @@ impl App {
             status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
         } else if matches!(self.overlay, Some(Overlay::Links { .. })) {
             status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
+        } else if matches!(self.overlay, Some(Overlay::Attachments { .. })) {
+            status_line(&[("j/k", "select"), ("s", "save"), ("o", "open")])
         } else if let Some(notice) = &self.notice {
             action_line(notice, self.undo.is_some())
         } else if self.searching {
@@ -409,6 +417,7 @@ impl App {
                 ("j/k", "scroll"),
                 ("r", "reply"),
                 ("l", "links"),
+                ("v", "files"),
                 ("m/s", "read/star"),
                 ("a/d", "archive/trash"),
                 ("esc", "close"),
@@ -571,6 +580,10 @@ impl App {
             }
             KeyCode::Char('l') if self.reader.is_some() => {
                 self.open_links();
+                return;
+            }
+            KeyCode::Char('v') if self.reader.is_some() => {
+                self.open_attachments();
                 return;
             }
             _ => {}
@@ -1008,6 +1021,48 @@ impl App {
         }
     }
 
+    fn open_attachments(&mut self) {
+        let items = self
+            .active_mail_id()
+            .and_then(|id| self.mails.iter().find(|mail| mail.id == id))
+            .map(|mail| mail.attachments.clone())
+            .unwrap_or_default();
+        if items.is_empty() {
+            self.notice = Some("This message has no attachments.".into());
+        } else {
+            self.overlay = Some(Overlay::Attachments { selected: 0, items });
+        }
+    }
+
+    fn save_active_attachment(&mut self, index: usize, open: bool) {
+        let Some(mail_id) = self.active_mail_id() else {
+            return;
+        };
+        let Some(mail) = self.mails.iter().find(|mail| mail.id == mail_id) else {
+            return;
+        };
+        match self
+            .source
+            .save_attachment(mail, index, &self.config.download_dir())
+        {
+            Ok(path) if open => {
+                self.notice = match opener::open(&path) {
+                    Ok(()) => Some(format!("Saved and opened {}", path.display())),
+                    Err(error) => Some(format!(
+                        "Saved to {}, but unable to open it: {error}",
+                        path.display()
+                    )),
+                };
+            }
+            Ok(path) => self.notice = Some(format!("Saved attachment to {}", path.display())),
+            Err(error) => {
+                self.notice = Some(format!(
+                    "Unable to save attachment: {error}. Check the download directory."
+                ));
+            }
+        }
+    }
+
     fn retry_outbox(&mut self) {
         let Some(mail_id) = self.active_mail_id() else {
             return;
@@ -1150,6 +1205,20 @@ impl App {
                         };
                     }
                 }
+                _ => self.overlay = Some(overlay),
+            },
+            Overlay::Attachments { selected, items } => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Down | KeyCode::Char('j') if *selected + 1 < items.len() => {
+                    *selected += 1;
+                    self.overlay = Some(overlay);
+                }
+                KeyCode::Up | KeyCode::Char('k') if *selected > 0 => {
+                    *selected -= 1;
+                    self.overlay = Some(overlay);
+                }
+                KeyCode::Char('s') => self.save_active_attachment(*selected, false),
+                KeyCode::Char('o') | KeyCode::Enter => self.save_active_attachment(*selected, true),
                 _ => self.overlay = Some(overlay),
             },
         }
@@ -1457,6 +1526,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
         Overlay::DraftReady(_) => (58, 7),
         Overlay::Folders { items, .. } => (50, (items.len() as u16 + 2).min(18)),
         Overlay::Links { items, .. } => (72, (items.len() as u16 + 2).min(16)),
+        Overlay::Attachments { items, .. } => (64, (items.len() as u16 + 2).min(16)),
     };
     let screen = frame.area();
     let area = Rect::new(
@@ -1477,6 +1547,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                 "  m  read/unread     s  star/unstar",
                 "  a  archive         d  move to Trash",
                 "  u  undo            r  reply       c  compose",
+                "  l  open links       v  attachments",
                 "  x  retry selected Outbox message",
                 "",
                 "inbox",
@@ -1573,6 +1644,34 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                         .border_style(theme::border(true))
                         .title_style(theme::title(true))
                         .title(" links · enter to open ")
+                        .bg(theme::SURFACE),
+                );
+            let mut state = ListState::default().with_selected(Some(*selected));
+            frame.render_stateful_widget(list, area, &mut state);
+        }
+        Overlay::Attachments { selected, items } => {
+            let rows: Vec<ListItem> = items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    ListItem::new(format!(
+                        "{}. {} · {} · {} bytes",
+                        index + 1,
+                        item.name,
+                        item.media_type,
+                        item.size
+                    ))
+                })
+                .collect();
+            let list = List::new(rows)
+                .style(theme::text())
+                .highlight_symbol("▌ ")
+                .highlight_style(theme::selection())
+                .block(
+                    Block::bordered()
+                        .border_style(theme::border(true))
+                        .title_style(theme::title(true))
+                        .title(" attachments · s save · o open ")
                         .bg(theme::SURFACE),
                 );
             let mut state = ListState::default().with_selected(Some(*selected));
