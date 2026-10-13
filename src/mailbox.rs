@@ -256,6 +256,10 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
                 unread,
                 starred,
                 attachment_count: parsed.attachments().count(),
+                attachments: Vec::new(),
+                links: Vec::new(),
+                html: false,
+                account: None,
                 source_path: Some(message.path().to_path_buf()),
                 mailbox: Some(mailbox.clone()),
             };

@@ -3,6 +3,13 @@ use std::{collections::HashSet, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Attachment {
+    pub name: String,
+    pub media_type: String,
+    pub size: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Mail {
     pub id: String,
     pub from: String,
@@ -17,6 +24,14 @@ pub struct Mail {
     pub unread: bool,
     pub starred: bool,
     pub attachment_count: usize,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+    #[serde(default)]
+    pub links: Vec<String>,
+    #[serde(default)]
+    pub html: bool,
+    #[serde(default)]
+    pub account: Option<String>,
     pub source_path: Option<PathBuf>,
     pub mailbox: Option<String>,
 }
@@ -149,6 +164,10 @@ impl Mail {
             unread: false,
             starred: false,
             attachment_count: 0,
+            attachments: Vec::new(),
+            links: Vec::new(),
+            html: false,
+            account: None,
             source_path: None,
             mailbox: None,
         }
