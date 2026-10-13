@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use directories::ProjectDirs;
+use directories::{ProjectDirs, UserDirs};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -12,6 +12,7 @@ pub struct Config {
     pub name: Option<String>,
     pub email: Option<String>,
     pub maildir: Option<PathBuf>,
+    pub download_dir: Option<PathBuf>,
     pub editor: Vec<String>,
     pub send_command: Vec<String>,
 }
@@ -34,6 +35,11 @@ impl Config {
             && maildir.is_relative()
         {
             config.maildir = Some(path.parent().unwrap_or(Path::new(".")).join(maildir));
+        }
+        if let Some(download_dir) = &config.download_dir
+            && download_dir.is_relative()
+        {
+            config.download_dir = Some(path.parent().unwrap_or(Path::new(".")).join(download_dir));
         }
         Ok(config)
     }
@@ -64,6 +70,13 @@ impl Config {
             vec!["vi".into()]
         }
     }
+
+    pub fn download_dir(&self) -> PathBuf {
+        self.download_dir
+            .clone()
+            .or_else(|| UserDirs::new().and_then(|dirs| dirs.download_dir().map(Path::to_path_buf)))
+            .unwrap_or_else(std::env::temp_dir)
+    }
 }
 
 pub fn default_path() -> Option<PathBuf> {
@@ -89,12 +102,17 @@ mod tests {
         let root = std::env::temp_dir().join(format!("termail-config-{nonce}"));
         fs::create_dir_all(&root).unwrap();
         let path = root.join("config.toml");
-        fs::write(&path, "email = 'tuna@example.com'\nmaildir = 'mail'\n").unwrap();
+        fs::write(
+            &path,
+            "email = 'tuna@example.com'\nmaildir = 'mail'\ndownload_dir = 'downloads'\n",
+        )
+        .unwrap();
 
         let config = Config::load(Some(&path)).unwrap();
         fs::remove_dir_all(&root).unwrap();
 
         assert_eq!(config.maildir, Some(root.join("mail")));
+        assert_eq!(config.download_dir, Some(root.join("downloads")));
         assert_eq!(config.identity().as_deref(), Some("tuna@example.com"));
     }
 }
