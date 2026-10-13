@@ -99,16 +99,44 @@ fn message_text(mail: &Mail) -> Text<'static> {
         lines.push(header_line("date", date, false));
     }
     lines.push(header_line("subject", &mail.subject, true));
-    if mail.attachment_count > 0 {
+    if mail.html {
+        lines.push(header_line("format", "html · remote images blocked", false));
+    }
+    for (index, attachment) in mail.attachments.iter().enumerate() {
         lines.push(header_line(
-            "files",
-            &format!("{} attachment(s)", mail.attachment_count),
+            if index == 0 { "files" } else { "" },
+            &format!(
+                "{}. {} · {}",
+                index + 1,
+                attachment.name,
+                size_label(attachment.size)
+            ),
             false,
         ));
     }
     lines.push(Line::default());
     lines.extend(mail.body.lines().map(|line| Line::from(line.to_owned())));
+    if !mail.links.is_empty() {
+        lines.push(Line::default());
+        lines.push(Line::styled("links", theme::muted()));
+        lines.extend(
+            mail.links
+                .iter()
+                .enumerate()
+                .map(|(index, link)| Line::from(format!("  {}. {link}", index + 1))),
+        );
+    }
     Text::from(lines)
+}
+
+fn size_label(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
 }
 
 fn header_line(label: &str, value: &str, bold: bool) -> Line<'static> {
@@ -137,10 +165,28 @@ fn message_content(mail: &Mail) -> String {
         headers.push(format!("date: {date}"));
     }
     headers.push(format!("subject: {}", mail.subject));
-    if mail.attachment_count > 0 {
-        headers.push(format!("files: {} attachment(s)", mail.attachment_count));
+    if mail.html {
+        headers.push("format: html · remote images blocked".into());
     }
-    format!("{}\n\n{}", headers.join("\n"), mail.body)
+    for attachment in &mail.attachments {
+        headers.push(format!(
+            "file: {} · {}",
+            attachment.name,
+            size_label(attachment.size)
+        ));
+    }
+    let links = mail
+        .links
+        .iter()
+        .enumerate()
+        .map(|(index, link)| format!("{}. {link}", index + 1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if links.is_empty() {
+        format!("{}\n\n{}", headers.join("\n"), mail.body)
+    } else {
+        format!("{}\n\n{}\n\nlinks\n{links}", headers.join("\n"), mail.body)
+    }
 }
 
 fn wrapped_line_count(value: &str, width: u16) -> usize {
@@ -190,7 +236,7 @@ fn reader_area(area: Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
-    use crate::mail::demo_mails;
+    use crate::mail::{Attachment, demo_mails};
     use ratatui::{Terminal, backend::TestBackend};
 
     use super::{Reader, wrapped_line_count};
@@ -233,5 +279,35 @@ mod tests {
         assert!(screen.contains("message"));
         assert!(screen.contains("ada@example.com"));
         assert!(screen.contains("the new build is ready"));
+    }
+
+    #[test]
+    fn renders_safe_rich_message_summary() {
+        let mut reader = Reader::new("project-1".into());
+        let mut mail = demo_mails().remove(0);
+        mail.html = true;
+        mail.links = vec!["https://example.com/report".into()];
+        mail.attachments = vec![Attachment {
+            name: "report.pdf".into(),
+            media_type: "application/pdf".into(),
+            size: 2048,
+        }];
+        let backend = TestBackend::new(80, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| reader.draw_docked(frame, frame.area(), &mail))
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(screen.contains("remote images blocked"));
+        assert!(screen.contains("report.pdf"));
+        assert!(screen.contains("https://example.com/report"));
     }
 }
