@@ -125,6 +125,42 @@ impl MailboxSource {
         save_message(root, ".Sent", "cur", contents, "!2,S").map_err(Into::into)
     }
 
+    pub fn save_attachment(
+        &self,
+        mail: &Mail,
+        index: usize,
+        destination: &Path,
+    ) -> Result<PathBuf, LoadError> {
+        let Self::Maildir(root) = self else {
+            return Err(LoadError {
+                message: "Open a Maildir mailbox to save attachments.".into(),
+            });
+        };
+        let source = mail.source_path.as_ref().ok_or_else(|| LoadError {
+            message: "Message has no Maildir path.".into(),
+        })?;
+        if !source.starts_with(root) {
+            return Err(LoadError {
+                message: "Message is outside the active Maildir.".into(),
+            });
+        }
+        let contents = fs::read(source)?;
+        let parsed = MessageParser::default()
+            .parse(&contents)
+            .ok_or_else(|| LoadError {
+                message: "Unable to parse the message attachment.".into(),
+            })?;
+        let part = parsed.attachments().nth(index).ok_or_else(|| LoadError {
+            message: "Attachment is no longer available.".into(),
+        })?;
+        let fallback = format!("attachment-{}", index + 1);
+        let name = safe_file_name(part.attachment_name().unwrap_or(&fallback));
+        fs::create_dir_all(destination)?;
+        let path = available_path(destination, &name);
+        fs::write(&path, part.contents())?;
+        Ok(path)
+    }
+
     fn set_flag(
         &self,
         mail: &Mail,
@@ -452,6 +488,79 @@ fn save_message(
     Ok(destination)
 }
 
+fn safe_file_name(value: &str) -> String {
+    let mut name: String = value
+        .chars()
+        .map(|character| {
+            if character.is_control() || "<>:\"/\\|?*".contains(character) {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect();
+    name = name.trim_matches([' ', '.']).to_owned();
+    if name.is_empty() {
+        return "attachment".into();
+    }
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    if matches!(
+        stem.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    ) {
+        name.insert(0, '_');
+    }
+    name
+}
+
+fn available_path(directory: &Path, name: &str) -> PathBuf {
+    let path = directory.join(name);
+    if !path.exists() {
+        return path;
+    }
+    let name = Path::new(name);
+    let stem = name
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("attachment");
+    let extension = name.extension().and_then(|value| value.to_str());
+    for number in 2.. {
+        let candidate = match extension {
+            Some(extension) => directory.join(format!("{stem} ({number}).{extension}")),
+            None => directory.join(format!("{stem} ({number})")),
+        };
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
 fn fingerprint_dir(path: &Path, fingerprint: &mut u64) -> io::Result<()> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
@@ -609,16 +718,18 @@ mod tests {
         )
         .unwrap();
 
-        let mail = MailboxSource::Maildir(root.clone())
-            .load()
-            .unwrap()
-            .mails
-            .remove(0);
+        let source = MailboxSource::Maildir(root.clone());
+        let mail = source.load().unwrap().mails.remove(0);
 
         assert!(mail.html);
         assert!(mail.body.contains("Read the report"));
         assert_eq!(mail.links, ["https://example.com/report"]);
         assert_eq!(mail.attachments[0].name, "notes.txt");
+        let saved = source
+            .save_attachment(&mail, 0, &root.join("downloads"))
+            .unwrap();
+        assert_eq!(saved.file_name().unwrap(), "notes.txt");
+        assert_eq!(fs::read_to_string(saved).unwrap().trim(), "hello");
         fs::remove_dir_all(root).unwrap();
     }
 }
