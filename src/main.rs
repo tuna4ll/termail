@@ -131,6 +131,10 @@ enum Overlay {
         selected: usize,
         items: Vec<FolderItem>,
     },
+    Links {
+        selected: usize,
+        items: Vec<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -243,6 +247,8 @@ impl App {
             } else if matches!(self.overlay, Some(Overlay::DraftReady(_))) {
                 status_line(&[("s", "send"), ("d", "save draft"), ("esc", "keep temp")])
             } else if matches!(self.overlay, Some(Overlay::Folders { .. })) {
+                status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
+            } else if matches!(self.overlay, Some(Overlay::Links { .. })) {
                 status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
             } else {
                 status_line(&[
@@ -392,6 +398,8 @@ impl App {
             status_line(&[("s", "send"), ("d", "save draft"), ("esc", "keep temp")])
         } else if matches!(self.overlay, Some(Overlay::Folders { .. })) {
             status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
+        } else if matches!(self.overlay, Some(Overlay::Links { .. })) {
+            status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
         } else if let Some(notice) = &self.notice {
             action_line(notice, self.undo.is_some())
         } else if self.searching {
@@ -400,6 +408,7 @@ impl App {
             status_line(&[
                 ("j/k", "scroll"),
                 ("r", "reply"),
+                ("l", "links"),
                 ("m/s", "read/star"),
                 ("a/d", "archive/trash"),
                 ("esc", "close"),
@@ -558,6 +567,10 @@ impl App {
             }
             KeyCode::Char('c') if self.reader.is_some() || self.focus == Pane::Inbox => {
                 self.start_draft(false);
+                return;
+            }
+            KeyCode::Char('l') if self.reader.is_some() => {
+                self.open_links();
                 return;
             }
             _ => {}
@@ -979,6 +992,22 @@ impl App {
         self.overlay = Some(Overlay::Folders { selected, items });
     }
 
+    fn open_links(&mut self) {
+        let links = self
+            .active_mail_id()
+            .and_then(|id| self.mails.iter().find(|mail| mail.id == id))
+            .map(|mail| mail.links.clone())
+            .unwrap_or_default();
+        if links.is_empty() {
+            self.notice = Some("This message has no web links.".into());
+        } else {
+            self.overlay = Some(Overlay::Links {
+                selected: 0,
+                items: links,
+            });
+        }
+    }
+
     fn retry_outbox(&mut self) {
         let Some(mail_id) = self.active_mail_id() else {
             return;
@@ -1097,6 +1126,28 @@ impl App {
                         self.active_folder = folder.name.clone();
                         self.reader = None;
                         self.rebuild_mailbox(None);
+                    }
+                }
+                _ => self.overlay = Some(overlay),
+            },
+            Overlay::Links { selected, items } => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Down | KeyCode::Char('j') if *selected + 1 < items.len() => {
+                    *selected += 1;
+                    self.overlay = Some(overlay);
+                }
+                KeyCode::Up | KeyCode::Char('k') if *selected > 0 => {
+                    *selected -= 1;
+                    self.overlay = Some(overlay);
+                }
+                KeyCode::Enter => {
+                    if let Some(link) = items.get(*selected) {
+                        self.notice = match opener::open(link) {
+                            Ok(()) => Some("Link opened in the default browser.".into()),
+                            Err(error) => Some(format!(
+                                "Unable to open link: {error}. Copy it from the message."
+                            )),
+                        };
                     }
                 }
                 _ => self.overlay = Some(overlay),
@@ -1405,6 +1456,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
         Overlay::Command(_) => (64, 3),
         Overlay::DraftReady(_) => (58, 7),
         Overlay::Folders { items, .. } => (50, (items.len() as u16 + 2).min(18)),
+        Overlay::Links { items, .. } => (72, (items.len() as u16 + 2).min(16)),
     };
     let screen = frame.area();
     let area = Rect::new(
@@ -1501,6 +1553,26 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                         .border_style(theme::border(true))
                         .title_style(theme::title(true))
                         .title(" folders ")
+                        .bg(theme::SURFACE),
+                );
+            let mut state = ListState::default().with_selected(Some(*selected));
+            frame.render_stateful_widget(list, area, &mut state);
+        }
+        Overlay::Links { selected, items } => {
+            let rows: Vec<ListItem> = items
+                .iter()
+                .enumerate()
+                .map(|(index, link)| ListItem::new(format!("{}. {link}", index + 1)))
+                .collect();
+            let list = List::new(rows)
+                .style(theme::text())
+                .highlight_symbol("▌ ")
+                .highlight_style(theme::selection())
+                .block(
+                    Block::bordered()
+                        .border_style(theme::border(true))
+                        .title_style(theme::title(true))
+                        .title(" links · enter to open ")
                         .bg(theme::SURFACE),
                 );
             let mut state = ListState::default().with_selected(Some(*selected));
