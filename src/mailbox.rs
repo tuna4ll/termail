@@ -8,12 +8,13 @@ use std::{
 
 use directories::ProjectDirs;
 use mail_parser::{
-    Address, MessageParser,
+    Address, MessageParser, MimeHeaders,
+    decoders::html::html_to_text,
     mailbox::maildir::{Flag, FolderIterator},
 };
 use serde::{Deserialize, Serialize};
 
-use crate::mail::{Mail, demo_mails};
+use crate::mail::{Attachment, Mail, demo_mails};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MailboxSource {
@@ -241,6 +242,35 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
                 .collect();
             let unread = !message.flags().contains(&Flag::Seen);
             let starred = message.flags().contains(&Flag::Flagged);
+            let html = parsed.html_body_count() > 0;
+            let html_body = parsed.body_html(0);
+            let body = parsed
+                .body_text(0)
+                .map(|body| body.into_owned())
+                .or_else(|| html_body.as_deref().map(html_to_text))
+                .unwrap_or_default();
+            let links = html_body.as_deref().map(extract_links).unwrap_or_default();
+            let attachments: Vec<Attachment> = parsed
+                .attachments()
+                .enumerate()
+                .map(|(index, part)| {
+                    let media_type = part
+                        .content_type()
+                        .map(|kind| {
+                            let subtype = kind.c_subtype.as_deref().unwrap_or("octet-stream");
+                            format!("{}/{subtype}", kind.c_type)
+                        })
+                        .unwrap_or_else(|| "application/octet-stream".into());
+                    Attachment {
+                        name: part
+                            .attachment_name()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| format!("attachment-{}", index + 1)),
+                        media_type,
+                        size: part.contents().len(),
+                    }
+                })
+                .collect();
 
             let mail = Mail {
                 id,
@@ -248,17 +278,17 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
                 to,
                 cc,
                 subject: parsed.subject().unwrap_or("(no subject)").into(),
-                body: parsed.body_text(0).unwrap_or_default().into_owned(),
+                body,
                 date,
                 timestamp,
                 reply_to,
                 references,
                 unread,
                 starred,
-                attachment_count: parsed.attachments().count(),
-                attachments: Vec::new(),
-                links: Vec::new(),
-                html: false,
+                attachment_count: attachments.len(),
+                attachments,
+                links,
+                html,
                 account: None,
                 source_path: Some(message.path().to_path_buf()),
                 mailbox: Some(mailbox.clone()),
@@ -468,6 +498,42 @@ fn format_address(address: &mail_parser::Addr<'_>) -> String {
     }
 }
 
+fn extract_links(html: &str) -> Vec<String> {
+    let lower = html.to_ascii_lowercase();
+    let mut links = Vec::new();
+    let mut offset = 0;
+
+    while let Some(position) = lower[offset..].find("href") {
+        let start = offset + position + 4;
+        let Some(equal) = html[start..].find('=') else {
+            break;
+        };
+        let value_start = start + equal + 1;
+        let value = html[value_start..].trim_start();
+        let skipped = html[value_start..].len() - value.len();
+        let Some(first) = value.chars().next() else {
+            break;
+        };
+        let (link, consumed) = if matches!(first, '\'' | '"') {
+            let rest = &value[first.len_utf8()..];
+            let end = rest.find(first).unwrap_or(rest.len());
+            (&rest[..end], end + first.len_utf8() * 2)
+        } else {
+            let end = value
+                .find(|character: char| character.is_whitespace() || character == '>')
+                .unwrap_or(value.len());
+            (&value[..end], end)
+        };
+        if (link.starts_with("https://") || link.starts_with("http://"))
+            && !links.iter().any(|existing| existing == link)
+        {
+            links.push(link.to_owned());
+        }
+        offset = value_start + skipped + consumed;
+    }
+    links
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -524,6 +590,35 @@ mod tests {
         assert!(draft.starts_with(root.join(".Drafts/new")));
         assert_eq!(fs::read(draft).unwrap(), b"To: ada@example.com\n\nhello");
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reads_html_links_and_attachments() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("termail-rich-{nonce}"));
+        for child in ["cur", "new", "tmp"] {
+            fs::create_dir_all(root.join(child)).unwrap();
+        }
+        fs::write(
+            root.join("new/message"),
+            b"From: ada@example.com\r\nSubject: Report\r\nMessage-ID: <rich@example.com>\r\nContent-Type: multipart/mixed; boundary=x\r\n\r\n--x\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Read <a href=\"https://example.com/report\">the report</a>.</p>\r\n--x\r\nContent-Type: text/plain; name=notes.txt\r\nContent-Disposition: attachment; filename=notes.txt\r\n\r\nhello\r\n--x--\r\n",
+        )
+        .unwrap();
+
+        let mail = MailboxSource::Maildir(root.clone())
+            .load()
+            .unwrap()
+            .mails
+            .remove(0);
+
+        assert!(mail.html);
+        assert!(mail.body.contains("Read the report"));
+        assert_eq!(mail.links, ["https://example.com/report"]);
+        assert_eq!(mail.attachments[0].name, "notes.txt");
         fs::remove_dir_all(root).unwrap();
     }
 }
