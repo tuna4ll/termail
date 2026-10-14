@@ -126,7 +126,14 @@ enum Overlay {
         scroll: u16,
     },
     Command(String),
-    DraftReady(PathBuf),
+    DraftReady {
+        path: PathBuf,
+        summary: draft::Summary,
+    },
+    DraftIssue {
+        path: PathBuf,
+        error: String,
+    },
     Folders {
         selected: usize,
         items: Vec<FolderItem>,
@@ -248,8 +255,14 @@ impl App {
                 status_line(&[("j/k", "scroll"), ("esc", "close help")])
             } else if matches!(self.overlay, Some(Overlay::Command(_))) {
                 status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
-            } else if matches!(self.overlay, Some(Overlay::DraftReady(_))) {
-                status_line(&[("s", "send"), ("d", "save draft"), ("esc", "keep temp")])
+            } else if matches!(self.overlay, Some(Overlay::DraftReady { .. })) {
+                status_line(&[("s", "send"), ("e", "edit"), ("d", "save draft")])
+            } else if matches!(self.overlay, Some(Overlay::DraftIssue { .. })) {
+                status_line(&[
+                    ("e", "fix draft"),
+                    ("d", "save draft"),
+                    ("esc", "keep temp"),
+                ])
             } else if matches!(self.overlay, Some(Overlay::Folders { .. })) {
                 status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
             } else if matches!(self.overlay, Some(Overlay::Links { .. })) {
@@ -400,8 +413,14 @@ impl App {
             status_line(&[("j/k", "scroll"), ("esc", "close help")])
         } else if matches!(self.overlay, Some(Overlay::Command(_))) {
             status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
-        } else if matches!(self.overlay, Some(Overlay::DraftReady(_))) {
-            status_line(&[("s", "send"), ("d", "save draft"), ("esc", "keep temp")])
+        } else if matches!(self.overlay, Some(Overlay::DraftReady { .. })) {
+            status_line(&[("s", "send"), ("e", "edit"), ("d", "save draft")])
+        } else if matches!(self.overlay, Some(Overlay::DraftIssue { .. })) {
+            status_line(&[
+                ("e", "fix draft"),
+                ("d", "save draft"),
+                ("esc", "keep temp"),
+            ])
         } else if matches!(self.overlay, Some(Overlay::Folders { .. })) {
             status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
         } else if matches!(self.overlay, Some(Overlay::Links { .. })) {
@@ -1158,8 +1177,17 @@ impl App {
                 }
                 _ => self.overlay = Some(overlay),
             },
-            Overlay::DraftReady(path) => match key.code {
+            Overlay::DraftReady { path, .. } => match key.code {
                 KeyCode::Char('s') => self.finish_draft(path.clone(), true),
+                KeyCode::Char('d') => self.finish_draft(path.clone(), false),
+                KeyCode::Char('e') => self.pending_draft = Some(path.clone()),
+                KeyCode::Esc => {
+                    self.notice = Some(format!("Draft kept at {}", path.display()));
+                }
+                _ => self.overlay = Some(overlay),
+            },
+            Overlay::DraftIssue { path, .. } => match key.code {
+                KeyCode::Char('e') => self.pending_draft = Some(path.clone()),
                 KeyCode::Char('d') => self.finish_draft(path.clone(), false),
                 KeyCode::Esc => {
                     self.notice = Some(format!("Draft kept at {}", path.display()));
@@ -1299,7 +1327,15 @@ impl App {
         match result {
             Ok(()) => {
                 self.notice = None;
-                self.overlay = Some(Overlay::DraftReady(path));
+                let contents = fs::read(&path)?;
+                let base = std::env::current_dir()?;
+                self.overlay = match draft::inspect(&contents, &base) {
+                    Ok(summary) => Some(Overlay::DraftReady { path, summary }),
+                    Err(error) => Some(Overlay::DraftIssue {
+                        path,
+                        error: error.to_string(),
+                    }),
+                };
             }
             Err(error) => {
                 self.notice = Some(format!(
@@ -1333,6 +1369,17 @@ impl App {
             return;
         };
         if send {
+            let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let contents = match draft::prepare(&contents, &base) {
+                Ok(contents) => contents,
+                Err(error) => {
+                    self.notice = Some(format!(
+                        "Unable to prepare message: {error}. Draft kept at {}",
+                        path.display()
+                    ));
+                    return;
+                }
+            };
             match sender::send(&self.config.send_command, &contents) {
                 Ok(()) => match self.source.save_sent(&contents) {
                     Ok(_) => {
@@ -1527,7 +1574,8 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
     let (width, height) = match overlay {
         Overlay::Help { .. } => (58, 19),
         Overlay::Command(_) => (64, 3),
-        Overlay::DraftReady(_) => (58, 7),
+        Overlay::DraftReady { .. } => (68, 11),
+        Overlay::DraftIssue { .. } => (68, 9),
         Overlay::Folders { items, .. } => (50, (items.len() as u16 + 2).min(18)),
         Overlay::Links { items, .. } => (72, (items.len() as u16 + 2).min(16)),
         Overlay::Attachments { items, .. } => (64, (items.len() as u16 + 2).min(16)),
@@ -1591,18 +1639,47 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                 area,
             );
         }
-        Overlay::DraftReady(_) => {
+        Overlay::DraftReady { summary, .. } => {
+            let cc = if summary.cc.is_empty() {
+                String::new()
+            } else {
+                format!("\nCc: {}", summary.cc)
+            };
+            let bcc = if summary.bcc.is_empty() {
+                String::new()
+            } else {
+                format!("\nBcc: {}", summary.bcc)
+            };
             frame.render_widget(
-                Paragraph::new(
-                    "Draft is ready\n\n s  Send message     d  Save draft     esc  Keep temporary file",
-                )
+                Paragraph::new(format!(
+                    "To: {}{cc}{bcc}\nSubject: {}\nAttachments: {}\n\n s  Send     e  Edit     d  Save draft     esc  Keep temporary file",
+                    summary.to,
+                    summary.subject,
+                    summary.attachments.len()
+                ))
                 .style(theme::text())
-                .alignment(Alignment::Center)
                 .block(
                     Block::bordered()
                         .border_style(theme::border(true))
                         .title_style(theme::title(true))
                         .title(" choose an action ")
+                        .bg(theme::SURFACE),
+                )
+                .wrap(Wrap { trim: true }),
+                area,
+            );
+        }
+        Overlay::DraftIssue { error, .. } => {
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "Unable to send this draft\n\n{error}\n\n e  Edit draft     d  Save draft     esc  Keep temporary file"
+                ))
+                .style(theme::text())
+                .block(
+                    Block::bordered()
+                        .border_style(theme::border(true))
+                        .title_style(theme::title(true))
+                        .title(" draft needs attention ")
                         .bg(theme::SURFACE),
                 )
                 .wrap(Wrap { trim: true }),
