@@ -16,6 +16,21 @@ pub struct Config {
     pub download_dir: Option<PathBuf>,
     pub editor: Vec<String>,
     pub send_command: Vec<String>,
+    pub default_account: Option<String>,
+    pub accounts: Vec<Account>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Account {
+    pub id: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub signature: Option<String>,
+    pub maildir: Option<PathBuf>,
+    pub download_dir: Option<PathBuf>,
+    pub editor: Vec<String>,
+    pub send_command: Vec<String>,
 }
 
 impl Config {
@@ -32,15 +47,20 @@ impl Config {
         }
         let contents = fs::read_to_string(&path)?;
         let mut config: Self = toml::from_str(&contents)?;
-        if let Some(maildir) = &config.maildir
-            && maildir.is_relative()
-        {
-            config.maildir = Some(path.parent().unwrap_or(Path::new(".")).join(maildir));
+        let base = path.parent().unwrap_or(Path::new("."));
+        resolve_path(&mut config.maildir, base);
+        resolve_path(&mut config.download_dir, base);
+        for account in &mut config.accounts {
+            resolve_path(&mut account.maildir, base);
+            resolve_path(&mut account.download_dir, base);
         }
-        if let Some(download_dir) = &config.download_dir
-            && download_dir.is_relative()
-        {
-            config.download_dir = Some(path.parent().unwrap_or(Path::new(".")).join(download_dir));
+        if !config.accounts.is_empty() {
+            let selected = config
+                .default_account
+                .as_deref()
+                .and_then(|id| config.accounts.iter().position(|account| account.id == id))
+                .unwrap_or_default();
+            config.activate(selected);
         }
         Ok(config)
     }
@@ -77,6 +97,46 @@ impl Config {
             .clone()
             .or_else(|| UserDirs::new().and_then(|dirs| dirs.download_dir().map(Path::to_path_buf)))
             .unwrap_or_else(std::env::temp_dir)
+    }
+
+    pub fn activate(&mut self, index: usize) -> bool {
+        let Some(account) = self.accounts.get(index).cloned() else {
+            return false;
+        };
+        self.name = account.name;
+        self.email = account.email;
+        self.signature = account.signature;
+        self.maildir = account.maildir;
+        self.download_dir = account.download_dir;
+        self.editor = account.editor;
+        self.send_command = account.send_command;
+        true
+    }
+
+    pub fn active_account_index(&self) -> usize {
+        self.email
+            .as_deref()
+            .and_then(|email| {
+                self.accounts
+                    .iter()
+                    .position(|account| account.email.as_deref() == Some(email))
+            })
+            .unwrap_or_default()
+    }
+}
+
+impl Account {
+    pub fn label(&self) -> String {
+        self.name
+            .clone()
+            .or_else(|| self.email.clone())
+            .unwrap_or_else(|| self.id.clone())
+    }
+}
+
+fn resolve_path(path: &mut Option<PathBuf>, base: &Path) {
+    if path.as_ref().is_some_and(|path| path.is_relative()) {
+        *path = path.take().map(|path| base.join(path));
     }
 }
 
@@ -115,5 +175,30 @@ mod tests {
         assert_eq!(config.maildir, Some(root.join("mail")));
         assert_eq!(config.download_dir, Some(root.join("downloads")));
         assert_eq!(config.identity().as_deref(), Some("tuna@example.com"));
+    }
+
+    #[test]
+    fn selects_the_default_account() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("termail-accounts-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("config.toml");
+        fs::write(
+            &path,
+            "default_account = 'work'\n[[accounts]]\nid = 'personal'\nemail = 'me@example.com'\nmaildir = 'personal'\n[[accounts]]\nid = 'work'\nname = 'Work'\nemail = 'me@work.test'\nmaildir = 'work'\n",
+        )
+        .unwrap();
+
+        let mut config = Config::load(Some(&path)).unwrap();
+
+        assert_eq!(config.identity().as_deref(), Some("Work <me@work.test>"));
+        assert_eq!(config.maildir, Some(root.join("work")));
+        assert_eq!(config.active_account_index(), 1);
+        assert!(config.activate(0));
+        assert_eq!(config.email.as_deref(), Some("me@example.com"));
+        fs::remove_dir_all(root).unwrap();
     }
 }
