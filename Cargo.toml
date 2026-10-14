@@ -7,11 +7,13 @@ license = "MIT"
 edition = "2024"
 
 [dependencies]
+base64 = "0.23.1"
 color-eyre = "0.6.5"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 directories = "6.0.0"
 futures = "0.3.32"
 mail-parser = "0.11.9"
+mime_guess = "2.0.5"
 opener = "0.8.5"
 rataflow = "0.1.0"
 ratatui = "0.30.2"
