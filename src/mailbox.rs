@@ -20,6 +20,7 @@ use crate::mail::{Attachment, Mail, demo_mails};
 pub enum MailboxSource {
     Demo,
     Maildir(PathBuf),
+    Unified(Vec<(String, PathBuf)>),
 }
 
 #[derive(Debug)]
@@ -53,6 +54,7 @@ impl MailboxSource {
         match self {
             Self::Demo => "demo mailbox".into(),
             Self::Maildir(path) => path.display().to_string(),
+            Self::Unified(_) => "all accounts".into(),
         }
     }
 
@@ -64,6 +66,7 @@ impl MailboxSource {
                 attempted: 7,
             }),
             Self::Maildir(path) => load_maildir(path),
+            Self::Unified(accounts) => load_unified(accounts),
         }
     }
 
@@ -71,6 +74,13 @@ impl MailboxSource {
         match self {
             Self::Demo => Ok(0),
             Self::Maildir(path) => mailbox_fingerprint(path).map_err(Into::into),
+            Self::Unified(accounts) => accounts
+                .iter()
+                .try_fold(0, |fingerprint, (id, path)| {
+                    mailbox_fingerprint(path)
+                        .map(|value| fingerprint ^ content_digest(id.as_bytes()) ^ value)
+                })
+                .map_err(Into::into),
         }
     }
 
@@ -101,7 +111,7 @@ impl MailboxSource {
     pub fn save_draft(&self, contents: &[u8]) -> Result<PathBuf, LoadError> {
         let Self::Maildir(root) = self else {
             return Err(LoadError {
-                message: "Open a Maildir mailbox to save drafts.".into(),
+                message: "Choose one account before saving drafts.".into(),
             });
         };
         save_message(root, ".Drafts", "new", contents, "").map_err(Into::into)
@@ -110,7 +120,7 @@ impl MailboxSource {
     pub fn save_outbox(&self, contents: &[u8]) -> Result<PathBuf, LoadError> {
         let Self::Maildir(root) = self else {
             return Err(LoadError {
-                message: "Open a Maildir mailbox to queue messages.".into(),
+                message: "Choose one account before queueing messages.".into(),
             });
         };
         save_message(root, ".Outbox", "new", contents, "").map_err(Into::into)
@@ -119,7 +129,7 @@ impl MailboxSource {
     pub fn save_sent(&self, contents: &[u8]) -> Result<PathBuf, LoadError> {
         let Self::Maildir(root) = self else {
             return Err(LoadError {
-                message: "Open a Maildir mailbox to save sent messages.".into(),
+                message: "Choose one account before saving sent messages.".into(),
             });
         };
         save_message(root, ".Sent", "cur", contents, "!2,S").map_err(Into::into)
@@ -131,7 +141,7 @@ impl MailboxSource {
         index: usize,
         destination: &Path,
     ) -> Result<PathBuf, LoadError> {
-        let Self::Maildir(root) = self else {
+        let Some(root) = self.root_for(mail)? else {
             return Err(LoadError {
                 message: "Open a Maildir mailbox to save attachments.".into(),
             });
@@ -167,7 +177,7 @@ impl MailboxSource {
         flag: char,
         enabled: bool,
     ) -> Result<Option<MaildirChange>, LoadError> {
-        let Self::Maildir(root) = self else {
+        let Some(root) = self.root_for(mail)? else {
             return Ok(None);
         };
         let path = mail.source_path.as_ref().ok_or_else(|| LoadError {
@@ -184,7 +194,7 @@ impl MailboxSource {
     }
 
     fn move_to(&self, mail: &Mail, folder: &str) -> Result<Option<MaildirChange>, LoadError> {
-        let Self::Maildir(root) = self else {
+        let Some(root) = self.root_for(mail)? else {
             return Ok(None);
         };
         let path = mail.source_path.as_ref().ok_or_else(|| LoadError {
@@ -198,6 +208,25 @@ impl MailboxSource {
         move_to_folder(path, &root.join(folder))
             .map(Some)
             .map_err(Into::into)
+    }
+
+    fn root_for<'a>(&'a self, mail: &Mail) -> Result<Option<&'a PathBuf>, LoadError> {
+        match self {
+            Self::Demo => Ok(None),
+            Self::Maildir(root) => Ok(Some(root)),
+            Self::Unified(accounts) => {
+                let account = mail.account.as_deref().ok_or_else(|| LoadError {
+                    message: "Message has no account.".into(),
+                })?;
+                accounts
+                    .iter()
+                    .find(|(id, _)| id == account)
+                    .map(|(_, path)| Some(path))
+                    .ok_or_else(|| LoadError {
+                        message: "Message account is no longer configured.".into(),
+                    })
+            }
+        }
     }
 }
 
@@ -349,6 +378,36 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
         skipped,
         attempted,
     })
+}
+
+fn load_unified(accounts: &[(String, PathBuf)]) -> Result<LoadReport, LoadError> {
+    let mut report = LoadReport {
+        mails: Vec::new(),
+        skipped: Vec::new(),
+        attempted: 0,
+    };
+    for (account, path) in accounts {
+        let loaded = load_maildir(path)?;
+        report.attempted += loaded.attempted;
+        report.skipped.extend(loaded.skipped);
+        report
+            .mails
+            .extend(loaded.mails.into_iter().map(|mut mail| {
+                mail.id = format!("{account}:{}", mail.id);
+                mail.reply_to = mail.reply_to.map(|id| format!("{account}:{id}"));
+                mail.references = mail
+                    .references
+                    .into_iter()
+                    .map(|id| format!("{account}:{id}"))
+                    .collect();
+                mail.account = Some(account.clone());
+                mail
+            }));
+    }
+    report
+        .mails
+        .sort_by_key(|mail| mail.timestamp.unwrap_or_default());
+    Ok(report)
 }
 
 fn cache_path(maildir: &Path) -> Option<PathBuf> {
