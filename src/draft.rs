@@ -6,18 +6,26 @@ use std::{
 
 use crate::mail::Mail;
 
-pub fn create(reply_to: Option<&Mail>, identity: Option<&str>) -> io::Result<PathBuf> {
+pub fn create(
+    reply_to: Option<&Mail>,
+    identity: Option<&str>,
+    signature: Option<&str>,
+) -> io::Result<PathBuf> {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
     let path =
         std::env::temp_dir().join(format!("termail-draft-{}-{nonce}.eml", std::process::id()));
-    fs::write(&path, template(reply_to, identity))?;
+    fs::write(&path, template(reply_to, identity, signature))?;
     Ok(path)
 }
 
-pub fn template(reply_to: Option<&Mail>, identity: Option<&str>) -> String {
+pub fn template(
+    reply_to: Option<&Mail>,
+    identity: Option<&str>,
+    signature: Option<&str>,
+) -> String {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -38,6 +46,8 @@ pub fn template(reply_to: Option<&Mail>, identity: Option<&str>) -> String {
         references.push(mail.id.clone());
         references.dedup();
         headers.push(format!("To: {}", one_line(&mail.from)));
+        headers.push("Cc: ".into());
+        headers.push("Bcc: ".into());
         headers.push(format!("Subject: {}", one_line(&subject)));
         headers.push(format!("In-Reply-To: <{}>", one_line(&mail.id)));
         headers.push(format!(
@@ -50,8 +60,12 @@ pub fn template(reply_to: Option<&Mail>, identity: Option<&str>) -> String {
         ));
     } else {
         headers.push("To: ".into());
+        headers.push("Cc: ".into());
+        headers.push("Bcc: ".into());
         headers.push("Subject: ".into());
     }
+
+    headers.push("Attach: ".into());
 
     headers.push(format!(
         "Message-ID: <termail-{}-{nonce}@localhost>",
@@ -59,7 +73,11 @@ pub fn template(reply_to: Option<&Mail>, identity: Option<&str>) -> String {
     ));
     headers.push("MIME-Version: 1.0".into());
     headers.push("Content-Type: text/plain; charset=utf-8".into());
-    format!("{}\n\n", headers.join("\n"))
+    let body = signature
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("\n\n-- \n{}", value.trim()))
+        .unwrap_or_default();
+    format!("{}\n\n{body}", headers.join("\n"))
 }
 
 fn one_line(value: &str) -> String {
@@ -82,12 +100,14 @@ mod tests {
             None,
         )
         .with_references(&["root@example.com"]);
-        let draft = template(Some(&mail), Some("Tuna <tuna@example.com>"));
+        let draft = template(Some(&mail), Some("Tuna <tuna@example.com>"), Some("Tuna"));
 
         assert!(draft.contains("From: Tuna <tuna@example.com>"));
         assert!(draft.contains("To: Ada <ada@example.com>"));
         assert!(draft.contains("Subject: Re: Update"));
         assert!(draft.contains("In-Reply-To: <first@example.com>"));
         assert!(draft.contains("<root@example.com> <first@example.com>"));
+        assert!(draft.contains("Cc: \nBcc: "));
+        assert!(draft.ends_with("-- \nTuna"));
     }
 }

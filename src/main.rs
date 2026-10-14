@@ -1279,7 +1279,11 @@ impl App {
             self.notice = Some("Select a message to reply.".into());
             return;
         }
-        match draft::create(mail, self.config.identity().as_deref()) {
+        match draft::create(
+            mail,
+            self.config.identity().as_deref(),
+            self.config.signature.as_deref(),
+        ) {
             Ok(path) => self.pending_draft = Some(path),
             Err(error) => self.notice = Some(format!("Unable to create draft: {error}")),
         }

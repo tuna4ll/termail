@@ -11,6 +11,7 @@ use serde::Deserialize;
 pub struct Config {
     pub name: Option<String>,
     pub email: Option<String>,
+    pub signature: Option<String>,
     pub maildir: Option<PathBuf>,
     pub download_dir: Option<PathBuf>,
     pub editor: Vec<String>,
