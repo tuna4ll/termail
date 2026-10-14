@@ -1,4 +1,5 @@
 mod config;
+mod doctor;
 mod draft;
 mod mail;
 mod mailbox;
@@ -55,6 +56,12 @@ async fn main() -> color_eyre::Result<()> {
         return Ok(());
     };
     let config = Config::load(options.config_path.as_deref())?;
+    if options.doctor {
+        if !doctor::run(&config) {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     let source = options
         .source
         .or_else(|| config.maildir.clone().map(MailboxSource::Maildir))
@@ -1768,6 +1775,7 @@ fn reader_is_docked(width: u16, reader_open: bool) -> bool {
 struct CliOptions {
     source: Option<MailboxSource>,
     config_path: Option<PathBuf>,
+    doctor: bool,
 }
 
 fn parse_options(
@@ -1776,6 +1784,7 @@ fn parse_options(
     let mut args = args.into_iter();
     let mut source = None;
     let mut config_path = None;
+    let mut doctor = false;
 
     while let Some(argument) = args.next() {
         match argument.to_str() {
@@ -1792,6 +1801,7 @@ fn parse_options(
                 config_path = Some(PathBuf::from(path));
             }
             Some("--demo") => source = Some(MailboxSource::Demo),
+            Some("doctor") => doctor = true,
             Some("--help" | "-h") => return Ok(None),
             Some(value) => return Err(color_eyre::eyre::eyre!("unknown option: {value}")),
             None => return Err(color_eyre::eyre::eyre!("option is not valid utf-8")),
@@ -1801,15 +1811,17 @@ fn parse_options(
     Ok(Some(CliOptions {
         source,
         config_path,
+        doctor,
     }))
 }
 
 fn print_help() {
-    println!("termail [--config PATH] [--demo | --maildir PATH]");
+    println!("termail [doctor] [--config PATH] [--demo | --maildir PATH]");
     println!();
     println!("  --demo          open the built-in mailbox");
     println!("  --maildir PATH  open a Maildir mailbox");
     println!("  --config PATH   load a config file");
+    println!("  doctor          check account, Maildir, editor, and sender setup");
 }
 
 fn expand_path(value: &str) -> PathBuf {
@@ -1850,6 +1862,13 @@ mod tests {
             options.source,
             Some(MailboxSource::Maildir(PathBuf::from("/tmp/mail")))
         );
+    }
+
+    #[test]
+    fn reads_doctor_command() {
+        let options = parse_options([OsString::from("doctor")]).unwrap().unwrap();
+
+        assert!(options.doctor);
     }
 
     #[test]
