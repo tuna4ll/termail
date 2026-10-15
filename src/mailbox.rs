@@ -791,4 +791,35 @@ mod tests {
         assert_eq!(fs::read_to_string(saved).unwrap().trim(), "hello");
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn keeps_unified_account_messages_separate() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("termail-unified-{nonce}"));
+        let personal = root.join("personal");
+        let work = root.join("work");
+        for maildir in [&personal, &work] {
+            for child in ["cur", "new", "tmp"] {
+                fs::create_dir_all(maildir.join(child)).unwrap();
+            }
+            fs::write(
+                maildir.join("new/message"),
+                b"From: ada@example.com\r\nSubject: Hello\r\nMessage-ID: <same@example.com>\r\n\r\nhi",
+            )
+            .unwrap();
+        }
+
+        let report =
+            MailboxSource::Unified(vec![("personal".into(), personal), ("work".into(), work)])
+                .load()
+                .unwrap();
+
+        assert_eq!(report.mails.len(), 2);
+        assert_eq!(report.mails[0].id, "personal:same@example.com");
+        assert_eq!(report.mails[1].id, "work:same@example.com");
+        fs::remove_dir_all(root).unwrap();
+    }
 }

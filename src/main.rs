@@ -105,6 +105,7 @@ pub struct App {
     overlay: Option<Overlay>,
     config: Config,
     active_folder: String,
+    account_label: String,
 }
 
 struct UndoAction {
@@ -153,6 +154,10 @@ enum Overlay {
         selected: usize,
         items: Vec<Attachment>,
     },
+    Accounts {
+        selected: usize,
+        items: Vec<AccountItem>,
+    },
 }
 
 #[derive(Clone)]
@@ -160,6 +165,12 @@ struct FolderItem {
     name: String,
     unread: usize,
     total: usize,
+}
+
+#[derive(Clone)]
+struct AccountItem {
+    label: String,
+    index: Option<usize>,
 }
 
 impl InboxFilter {
@@ -181,6 +192,12 @@ enum Pane {
 impl App {
     pub fn new(source: MailboxSource, config: Config) -> Self {
         let (load_tx, load_rx) = mpsc::unbounded_channel();
+        let account_label = config
+            .accounts
+            .get(config.active_account_index())
+            .map(|account| account.label())
+            .or_else(|| config.identity())
+            .unwrap_or_else(|| "local".into());
         let mut app = Self {
             running: false,
             event_stream: EventStream::new(),
@@ -206,6 +223,7 @@ impl App {
             overlay: None,
             config,
             active_folder: "INBOX".into(),
+            account_label,
         };
         app.reload();
         app
@@ -276,6 +294,8 @@ impl App {
                 status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
             } else if matches!(self.overlay, Some(Overlay::Attachments { .. })) {
                 status_line(&[("j/k", "select"), ("s", "save"), ("o", "open")])
+            } else if matches!(self.overlay, Some(Overlay::Accounts { .. })) {
+                status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
             } else {
                 status_line(&[
                     ("r", "retry"),
@@ -332,9 +352,22 @@ impl App {
                 } else {
                     theme::muted()
                 };
+                let account = self.mails.iter().find_map(|mail| {
+                    conversation
+                        .mail_ids
+                        .contains(&mail.id)
+                        .then(|| mail.account.as_deref())
+                        .flatten()
+                });
+                let sender = match account {
+                    Some(account) if matches!(self.source, MailboxSource::Unified(_)) => {
+                        format!("from {last_sender} · {account}")
+                    }
+                    _ => format!("from {last_sender}"),
+                };
                 ListItem::new(vec![
                     Line::styled(subject, subject_style),
-                    Line::styled(format!("from {last_sender}"), sender_style),
+                    Line::styled(sender, sender_style),
                 ])
             })
             .collect();
@@ -348,11 +381,14 @@ impl App {
         } else if self.filter != InboxFilter::All {
             format!(" inbox • {} ", self.filter.label())
         } else if self.skipped > 0 {
-            format!(" {} • {} skipped ", self.active_folder, self.skipped)
+            format!(
+                " {} · {} • {} skipped ",
+                self.account_label, self.active_folder, self.skipped
+            )
         } else if inbox_focused {
-            format!(" {} • active ", self.active_folder)
+            format!(" {} · {} • active ", self.account_label, self.active_folder)
         } else {
-            format!(" {} ", self.active_folder)
+            format!(" {} · {} ", self.account_label, self.active_folder)
         };
         let list = List::new(items)
             .style(theme::text())
@@ -434,6 +470,8 @@ impl App {
             status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
         } else if matches!(self.overlay, Some(Overlay::Attachments { .. })) {
             status_line(&[("j/k", "select"), ("s", "save"), ("o", "open")])
+        } else if matches!(self.overlay, Some(Overlay::Accounts { .. })) {
+            status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
         } else if let Some(notice) = &self.notice {
             action_line(notice, self.undo.is_some())
         } else if self.searching {
@@ -453,6 +491,7 @@ impl App {
                 Pane::Inbox => status_line(&[
                     ("tab", "thread map"),
                     ("g", "folders"),
+                    ("p", "accounts"),
                     ("j/k", "select"),
                     ("/", "search"),
                     ("1/2/3", "filter"),
@@ -570,6 +609,10 @@ impl App {
             }
             KeyCode::Char('g') => {
                 self.open_folders();
+                return;
+            }
+            KeyCode::Char('p') => {
+                self.open_accounts();
                 return;
             }
             KeyCode::Char('x') if self.active_folder == "Outbox" => {
@@ -995,7 +1038,10 @@ impl App {
             .iter()
             .map(|mail| mail_folder(mail).into())
             .collect();
-        if matches!(self.source, MailboxSource::Maildir(_)) {
+        if matches!(
+            self.source,
+            MailboxSource::Maildir(_) | MailboxSource::Unified(_)
+        ) {
             names.extend(
                 ["INBOX", "Drafts", "Sent", "Archive", "Trash", "Outbox"]
                     .into_iter()
@@ -1058,6 +1104,75 @@ impl App {
         } else {
             self.overlay = Some(Overlay::Attachments { selected: 0, items });
         }
+    }
+
+    fn open_accounts(&mut self) {
+        if self.config.accounts.len() < 2 {
+            self.notice = Some("Add another [[accounts]] entry to switch accounts.".into());
+            return;
+        }
+        let mut items = vec![AccountItem {
+            label: "All accounts".into(),
+            index: None,
+        }];
+        items.extend(
+            self.config
+                .accounts
+                .iter()
+                .enumerate()
+                .map(|(index, account)| AccountItem {
+                    label: account.label(),
+                    index: Some(index),
+                }),
+        );
+        let selected = if matches!(self.source, MailboxSource::Unified(_)) {
+            0
+        } else {
+            self.config.active_account_index() + 1
+        };
+        self.overlay = Some(Overlay::Accounts { selected, items });
+    }
+
+    fn select_account(&mut self, index: Option<usize>) {
+        let source = match index {
+            None => {
+                let maildirs: Vec<(String, PathBuf)> = self
+                    .config
+                    .accounts
+                    .iter()
+                    .filter_map(|account| {
+                        account
+                            .maildir
+                            .clone()
+                            .map(|path| (account.id.clone(), path))
+                    })
+                    .collect();
+                if maildirs.len() < 2 {
+                    self.notice = Some("Configure Maildir paths for at least two accounts.".into());
+                    return;
+                }
+                self.account_label = "all accounts".into();
+                MailboxSource::Unified(maildirs)
+            }
+            Some(index) => {
+                if !self.config.activate(index) {
+                    return;
+                }
+                let Some(path) = self.config.maildir.clone() else {
+                    self.notice = Some("Set maildir for this account in config.toml.".into());
+                    return;
+                };
+                self.account_label = self.config.accounts[index].label();
+                MailboxSource::Maildir(path)
+            }
+        };
+        self.source = source;
+        self.active_folder = "INBOX".into();
+        self.filter = InboxFilter::All;
+        self.query.clear();
+        self.undo = None;
+        self.reader = None;
+        self.reload();
     }
 
     fn save_active_attachment(&mut self, index: usize, open: bool) {
@@ -1256,6 +1371,23 @@ impl App {
                 KeyCode::Char('o') | KeyCode::Enter => self.save_active_attachment(*selected, true),
                 _ => self.overlay = Some(overlay),
             },
+            Overlay::Accounts { selected, items } => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Down | KeyCode::Char('j') if *selected + 1 < items.len() => {
+                    *selected += 1;
+                    self.overlay = Some(overlay);
+                }
+                KeyCode::Up | KeyCode::Char('k') if *selected > 0 => {
+                    *selected -= 1;
+                    self.overlay = Some(overlay);
+                }
+                KeyCode::Enter => {
+                    if let Some(item) = items.get(*selected) {
+                        self.select_account(item.index);
+                    }
+                }
+                _ => self.overlay = Some(overlay),
+            },
         }
         true
     }
@@ -1302,8 +1434,12 @@ impl App {
     }
 
     fn start_draft(&mut self, reply: bool) {
-        if matches!(self.source, MailboxSource::Demo) {
-            self.notice = Some("Open a Maildir mailbox to save drafts.".into());
+        if !matches!(self.source, MailboxSource::Maildir(_)) {
+            self.notice = Some(if matches!(self.source, MailboxSource::Unified(_)) {
+                "Choose one account with p before composing.".into()
+            } else {
+                "Open a Maildir mailbox to save drafts.".into()
+            });
             return;
         }
         let mail = reply
@@ -1586,6 +1722,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
         Overlay::Folders { items, .. } => (50, (items.len() as u16 + 2).min(18)),
         Overlay::Links { items, .. } => (72, (items.len() as u16 + 2).min(16)),
         Overlay::Attachments { items, .. } => (64, (items.len() as u16 + 2).min(16)),
+        Overlay::Accounts { items, .. } => (52, (items.len() as u16 + 2).min(16)),
     };
     let screen = frame.area();
     let area = Rect::new(
@@ -1611,6 +1748,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                 "",
                 "inbox",
                 "  /  search      g  folders      1/2/3  filters",
+                "  p  accounts",
                 "",
                 "commands",
                 "  :reload                 :filter unread",
@@ -1760,6 +1898,25 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                         .border_style(theme::border(true))
                         .title_style(theme::title(true))
                         .title(" attachments · s save · o open ")
+                        .bg(theme::SURFACE),
+                );
+            let mut state = ListState::default().with_selected(Some(*selected));
+            frame.render_stateful_widget(list, area, &mut state);
+        }
+        Overlay::Accounts { selected, items } => {
+            let rows: Vec<ListItem> = items
+                .iter()
+                .map(|item| ListItem::new(item.label.clone()))
+                .collect();
+            let list = List::new(rows)
+                .style(theme::text())
+                .highlight_symbol("▌ ")
+                .highlight_style(theme::selection())
+                .block(
+                    Block::bordered()
+                        .border_style(theme::border(true))
+                        .title_style(theme::title(true))
+                        .title(" accounts ")
                         .bg(theme::SURFACE),
                 );
             let mut state = ListState::default().with_selected(Some(*selected));
