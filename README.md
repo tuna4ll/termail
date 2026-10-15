@@ -26,6 +26,14 @@ cargo run -- --config sandbox/config.toml
 Compose with `c`, close the editor, then select Send. The built-in test transport appends the full
 message to `sandbox/sent.log`, while Termail stores its Maildir copy in
 `sandbox/maildir/.Sent/cur`. Archive, Trash, Drafts and Outbox stay inside the sandbox too.
+Press `p` to switch to the work account or the unified inbox. Its sample message includes HTML, a
+safe web link and an attachment. Saved attachments go to `sandbox/downloads`.
+
+Run the setup check without opening the interface:
+
+```sh
+cargo run -- doctor --config sandbox/config.toml
+```
 
 The same command works in PowerShell, Command Prompt and Unix shells. Delete `sandbox/sent.log` and
 the generated messages under the dot-folders whenever you want to reset your local test.
@@ -39,14 +47,39 @@ per-user config directory selected by the operating system.
 name = "Tuna Kılıç"
 email = "tuna@example.com"
 maildir = "/path/to/Mail"
+download_dir = "/path/to/Downloads"
 editor = ["code", "--wait"]
 send_command = ["msmtp", "-t"]
+signature = "Tuna"
 ```
 
 Commands are argument arrays rather than shell strings, so paths and quoting behave consistently
 on Windows, Linux and macOS. On Windows, an executable such as `msmtp.exe` can be used in
 `send_command`. Without an editor setting, Termail uses `$EDITOR`, then Notepad on Windows,
 TextEdit on macOS, or `vi` on Linux.
+
+For multiple accounts, use `[[accounts]]` and choose the initial account with `default_account`:
+
+```toml
+default_account = "personal"
+
+[[accounts]]
+id = "personal"
+name = "Tuna"
+email = "tuna@example.com"
+maildir = "/path/to/Personal"
+send_command = ["msmtp", "-a", "personal", "-t"]
+
+[[accounts]]
+id = "work"
+name = "Tuna Work"
+email = "tuna@work.example"
+maildir = "/path/to/Work"
+send_command = ["msmtp", "-a", "work", "-t"]
+```
+
+`termail doctor` checks the selected account, Maildir structure, editor, sender and attachment
+download directory. Existing single-account configuration remains supported.
 
 ## Keys
 
@@ -64,12 +97,20 @@ TextEdit on macOS, or `vi` on Linux.
 | `u` | Undo the last message action |
 | `c` / `r` | Compose a message or reply in `$EDITOR` |
 | `g` | Open the folder navigator |
+| `p` | Switch account or open the unified inbox |
+| `l` | List the open message's web links |
+| `v` | Browse, save or open attachments |
 | `x` | Retry the selected Outbox message |
 | `:` | Open the command palette |
 | `?` | Show all shortcuts |
 
 After editing, choose Send or Save draft. Failed sends are retained in `.Outbox/new`; successful
 sends are copied to `.Sent/cur`. Maildir++ folders are created when first used.
+
+Drafts support `To`, `Cc`, `Bcc`, `Subject` and repeated `Attach` headers. Add one file per line,
+for example `Attach: sandbox/files/example.txt`. Termail validates recipients and attachments,
+then shows a summary before sending. HTML messages are converted to terminal text without loading
+remote images. Links open only after explicit selection.
 
 ## Commands
 
