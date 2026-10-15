@@ -14,7 +14,7 @@ directories = "6.0.0"
 futures = "0.3.32"
 mail-parser = "0.11.9"
 mime_guess = "2.0.5"
-opener = "0.8.5"
+opener = "0.9.0"
 rataflow = "0.1.0"
 ratatui = "0.30.2"
 ratatui-spinner = { git = "https://github.com/ratatui/ratatui-spinner" }
