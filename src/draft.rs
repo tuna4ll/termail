@@ -144,7 +144,14 @@ pub fn inspect(contents: &[u8], base: &Path) -> Result<Summary, DraftError> {
 pub fn prepare(contents: &[u8], base: &Path) -> Result<Vec<u8>, DraftError> {
     let summary = inspect(contents, base)?;
     if summary.attachments.is_empty() {
-        return Ok(contents.to_vec());
+        let text = String::from_utf8_lossy(contents);
+        let (headers, body) = split_message(&text);
+        let headers = headers
+            .lines()
+            .filter(|line| !line.to_ascii_lowercase().starts_with("attach:"))
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        return Ok(format!("{headers}\r\n\r\n{body}").into_bytes());
     }
     let text = String::from_utf8_lossy(contents);
     let (headers, body) = split_message(&text);
@@ -283,5 +290,18 @@ mod tests {
     fn rejects_missing_recipients() {
         let error = inspect(b"To: \nSubject: hi\n\nbody", Path::new(".")).unwrap_err();
         assert!(error.to_string().contains("at least one recipient"));
+    }
+
+    #[test]
+    fn removes_empty_attachment_headers() {
+        let message = prepare(
+            b"To: ada@example.com\nSubject: hi\nAttach: \n\nhello",
+            Path::new("."),
+        )
+        .unwrap();
+        let message = String::from_utf8(message).unwrap();
+
+        assert!(!message.contains("Attach:"));
+        assert!(message.ends_with("hello"));
     }
 }
