@@ -312,7 +312,7 @@ fn load_maildir(path: &PathBuf) -> Result<LoadReport, LoadError> {
             let body = parsed
                 .body_text(0)
                 .map(|body| body.into_owned())
-                .or_else(|| html_body.as_deref().map(html_to_text))
+                .or_else(|| html_body.as_deref().map(readable_html))
                 .unwrap_or_default();
             let links = html_body.as_deref().map(extract_links).unwrap_or_default();
             let attachments: Vec<Attachment> = parsed
@@ -702,6 +702,39 @@ fn extract_links(html: &str) -> Vec<String> {
     links
 }
 
+fn readable_html(html: &str) -> String {
+    let mut prepared = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.find('<') {
+        prepared.push_str(&rest[..start]);
+        let Some(end) = rest[start..].find('>') else {
+            prepared.push_str(&rest[start..]);
+            rest = "";
+            break;
+        };
+        let tag = &rest[start..=start + end];
+        let name = tag[1..tag.len() - 1]
+            .trim()
+            .trim_start_matches('/')
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if tag.starts_with("</")
+            && matches!(
+                name.as_str(),
+                "p" | "div" | "h1" | "h2" | "h3" | "li" | "tr"
+            )
+        {
+            prepared.push_str("<br>");
+        }
+        prepared.push_str(tag);
+        rest = &rest[start + end + 1..];
+    }
+    prepared.push_str(rest);
+    html_to_text(&prepared)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -709,7 +742,15 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::MailboxSource;
+    use super::{MailboxSource, readable_html};
+
+    #[test]
+    fn keeps_html_blocks_readable() {
+        let text = readable_html("<h1>Launch</h1><p>Ready now.</p>");
+
+        assert!(text.contains("Launch\n"));
+        assert!(text.contains("Ready now."));
+    }
 
     #[test]
     fn loads_maildir_headers_and_flags() {
