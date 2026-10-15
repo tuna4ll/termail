@@ -1,0 +1,20 @@
+From: Ada Lovelace <ada@work.test>
+To: Tuna Work <tuna@work.test>
+Subject: launch checklist
+Message-ID: <launch-1@work.test>
+Date: Fri, 2 Oct 2026 10:24:00 +0300
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="termail-sandbox"
+
+--termail-sandbox
+Content-Type: text/html; charset=utf-8
+
+<html><body><h1>Launch checklist</h1><p>The final review is ready. <a href="https://example.com/review">Open the review</a>.</p><img src="https://example.com/tracker.png"></body></html>
+--termail-sandbox
+Content-Type: text/plain; name="checklist.txt"
+Content-Disposition: attachment; filename="checklist.txt"
+Content-Transfer-Encoding: base64
+
+LSBkb2N1bWVudGF0aW9uCi0gcmVsZWFzZSBub3RlcwotIHNt
+b2tlIHRlc3QK
+--termail-sandbox--

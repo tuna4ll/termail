@@ -1,4 +1,19 @@
+default_account = "personal"
+
+[[accounts]]
+id = "personal"
 name = "Tuna Test"
 email = "tuna@termail.test"
+signature = "Tuna\nSent with Termail"
 maildir = "maildir"
+download_dir = "downloads"
+send_command = ["termail-test-sink", "sandbox/sent.log"]
+
+[[accounts]]
+id = "work"
+name = "Tuna Work"
+email = "tuna@work.test"
+signature = "Tuna Kılıç"
+maildir = "work-maildir"
+download_dir = "downloads"
 send_command = ["termail-test-sink", "sandbox/sent.log"]
