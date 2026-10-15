@@ -415,7 +415,7 @@ fn cache_path(maildir: &Path) -> Option<PathBuf> {
     maildir.hash(&mut hasher);
     ProjectDirs::from("com", "tunakilic", "termail").map(|dirs| {
         dirs.cache_dir()
-            .join(format!("maildir-{:016x}.json", hasher.finish()))
+            .join(format!("maildir-v2-{:016x}.json", hasher.finish()))
     })
 }
 
