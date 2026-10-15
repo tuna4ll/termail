@@ -288,14 +288,13 @@ impl App {
                     ("d", "save draft"),
                     ("esc", "keep temp"),
                 ])
-            } else if matches!(self.overlay, Some(Overlay::Folders { .. })) {
-                status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
-            } else if matches!(self.overlay, Some(Overlay::Links { .. })) {
+            } else if matches!(
+                self.overlay,
+                Some(Overlay::Folders { .. } | Overlay::Links { .. } | Overlay::Accounts { .. })
+            ) {
                 status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
             } else if matches!(self.overlay, Some(Overlay::Attachments { .. })) {
                 status_line(&[("j/k", "select"), ("s", "save"), ("o", "open")])
-            } else if matches!(self.overlay, Some(Overlay::Accounts { .. })) {
-                status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
             } else {
                 status_line(&[
                     ("r", "retry"),
@@ -356,7 +355,7 @@ impl App {
                     conversation
                         .mail_ids
                         .contains(&mail.id)
-                        .then(|| mail.account.as_deref())
+                        .then_some(mail.account.as_deref())
                         .flatten()
                 });
                 let sender = match account {
@@ -464,14 +463,13 @@ impl App {
                 ("d", "save draft"),
                 ("esc", "keep temp"),
             ])
-        } else if matches!(self.overlay, Some(Overlay::Folders { .. })) {
-            status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
-        } else if matches!(self.overlay, Some(Overlay::Links { .. })) {
+        } else if matches!(
+            self.overlay,
+            Some(Overlay::Folders { .. } | Overlay::Links { .. } | Overlay::Accounts { .. })
+        ) {
             status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
         } else if matches!(self.overlay, Some(Overlay::Attachments { .. })) {
             status_line(&[("j/k", "select"), ("s", "save"), ("o", "open")])
-        } else if matches!(self.overlay, Some(Overlay::Accounts { .. })) {
-            status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
         } else if let Some(notice) = &self.notice {
             action_line(notice, self.undo.is_some())
         } else if self.searching {
