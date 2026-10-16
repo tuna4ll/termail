@@ -154,80 +154,6 @@ impl Composer {
     }
 }
 
-pub fn create(
-    reply_to: Option<&Mail>,
-    identity: Option<&str>,
-    signature: Option<&str>,
-) -> io::Result<PathBuf> {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let path =
-        std::env::temp_dir().join(format!("termail-draft-{}-{nonce}.eml", std::process::id()));
-    fs::write(&path, template(reply_to, identity, signature))?;
-    Ok(path)
-}
-
-pub fn template(
-    reply_to: Option<&Mail>,
-    identity: Option<&str>,
-    signature: Option<&str>,
-) -> String {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let mut headers = Vec::new();
-
-    if let Some(identity) = identity {
-        headers.push(format!("From: {}", one_line(identity)));
-    }
-
-    if let Some(mail) = reply_to {
-        let subject = if mail.subject.to_lowercase().starts_with("re:") {
-            mail.subject.clone()
-        } else {
-            format!("Re: {}", mail.subject)
-        };
-        let mut references = mail.references.clone();
-        references.push(mail.id.clone());
-        references.dedup();
-        headers.push(format!("To: {}", one_line(&mail.from)));
-        headers.push("Cc: ".into());
-        headers.push("Bcc: ".into());
-        headers.push(format!("Subject: {}", one_line(&subject)));
-        headers.push(format!("In-Reply-To: <{}>", one_line(&mail.id)));
-        headers.push(format!(
-            "References: {}",
-            references
-                .iter()
-                .map(|id| format!("<{}>", one_line(id)))
-                .collect::<Vec<_>>()
-                .join(" ")
-        ));
-    } else {
-        headers.push("To: ".into());
-        headers.push("Cc: ".into());
-        headers.push("Bcc: ".into());
-        headers.push("Subject: ".into());
-    }
-
-    headers.push("Attach: ".into());
-
-    headers.push(format!(
-        "Message-ID: <termail-{}-{nonce}@localhost>",
-        std::process::id()
-    ));
-    headers.push("MIME-Version: 1.0".into());
-    headers.push("Content-Type: text/plain; charset=utf-8".into());
-    let body = signature
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| format!("\n\n-- \n{}", value.trim()))
-        .unwrap_or_default();
-    format!("{}\n\n{body}", headers.join("\n"))
-}
-
 fn one_line(value: &str) -> String {
     value.replace(['\r', '\n'], " ")
 }
@@ -382,7 +308,7 @@ mod tests {
 
     use crate::mail::Mail;
 
-    use super::{Composer, inspect, prepare, template};
+    use super::{Composer, inspect, prepare};
 
     #[test]
     fn keeps_headers_out_of_the_body_editor() {
@@ -392,7 +318,8 @@ mod tests {
             "Update",
             "hi",
             None,
-        );
+        )
+        .with_references(&["root@example.com"]);
         let mut composer =
             Composer::new(Some(&mail), Some("Tuna <tuna@example.com>"), Some("Tuna")).unwrap();
         composer.cc = "mert@example.com".into();
@@ -404,28 +331,9 @@ mod tests {
         assert!(message.contains("To: Ada <ada@example.com>"));
         assert!(message.contains("Cc: mert@example.com"));
         assert!(message.contains("Subject: Re: Update"));
+        assert!(message.contains("In-Reply-To: <first@example.com>"));
+        assert!(message.contains("<root@example.com> <first@example.com>"));
         composer.remove_body().unwrap();
-    }
-
-    #[test]
-    fn builds_reply_headers() {
-        let mail = Mail::new(
-            "first@example.com",
-            "Ada <ada@example.com>",
-            "Update",
-            "hi",
-            None,
-        )
-        .with_references(&["root@example.com"]);
-        let draft = template(Some(&mail), Some("Tuna <tuna@example.com>"), Some("Tuna"));
-
-        assert!(draft.contains("From: Tuna <tuna@example.com>"));
-        assert!(draft.contains("To: Ada <ada@example.com>"));
-        assert!(draft.contains("Subject: Re: Update"));
-        assert!(draft.contains("In-Reply-To: <first@example.com>"));
-        assert!(draft.contains("<root@example.com> <first@example.com>"));
-        assert!(draft.contains("Cc: \nBcc: "));
-        assert!(draft.ends_with("-- \nTuna"));
     }
 
     #[test]
