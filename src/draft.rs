@@ -97,6 +97,10 @@ impl Composer {
         prepare(self.source()?.as_bytes(), base)
     }
 
+    pub fn draft_message(&self, base: &Path) -> Result<Vec<u8>, DraftError> {
+        prepare_message(self.source()?.as_bytes(), base, false)
+    }
+
     pub fn body_stats(&self) -> io::Result<(usize, usize)> {
         let body = fs::read_to_string(&self.body_path)?;
         Ok((body.lines().count(), body.chars().count()))
@@ -229,12 +233,20 @@ fn one_line(value: &str) -> String {
 }
 
 pub fn inspect(contents: &[u8], base: &Path) -> Result<Summary, DraftError> {
+    inspect_message(contents, base, true)
+}
+
+fn inspect_message(
+    contents: &[u8],
+    base: &Path,
+    require_recipient: bool,
+) -> Result<Summary, DraftError> {
     let text = String::from_utf8_lossy(contents);
     let (headers, _) = split_message(&text);
     let to = header_values(headers, "to").join(", ");
     let cc = header_values(headers, "cc").join(", ");
     let bcc = header_values(headers, "bcc").join(", ");
-    if to.trim().is_empty() && cc.trim().is_empty() && bcc.trim().is_empty() {
+    if require_recipient && to.trim().is_empty() && cc.trim().is_empty() && bcc.trim().is_empty() {
         return Err(DraftError(
             "Add at least one recipient to To, Cc, or Bcc.".into(),
         ));
@@ -264,7 +276,15 @@ pub fn inspect(contents: &[u8], base: &Path) -> Result<Summary, DraftError> {
 }
 
 pub fn prepare(contents: &[u8], base: &Path) -> Result<Vec<u8>, DraftError> {
-    let summary = inspect(contents, base)?;
+    prepare_message(contents, base, true)
+}
+
+fn prepare_message(
+    contents: &[u8],
+    base: &Path,
+    require_recipient: bool,
+) -> Result<Vec<u8>, DraftError> {
+    let summary = inspect_message(contents, base, require_recipient)?;
     if summary.attachments.is_empty() {
         let text = String::from_utf8_lossy(contents);
         let (headers, body) = split_message(&text);
@@ -448,5 +468,15 @@ mod tests {
 
         assert!(!message.contains("Attach:"));
         assert!(message.ends_with("hello"));
+    }
+
+    #[test]
+    fn saves_an_incomplete_structured_draft() {
+        let composer = Composer::new(None, Some("tuna@example.com"), None).unwrap();
+        let message = String::from_utf8(composer.draft_message(Path::new(".")).unwrap()).unwrap();
+
+        assert!(message.contains("To: \r\n"));
+        assert!(message.contains("Subject: \r\n"));
+        composer.remove_body().unwrap();
     }
 }
