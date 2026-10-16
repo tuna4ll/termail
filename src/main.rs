@@ -1810,7 +1810,7 @@ fn draw_no_matches(frame: &mut Frame, area: Rect, folder: &str, folder_empty: bo
 
 fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
     let (width, height) = match overlay {
-        Overlay::Help { .. } => (58, 19),
+        Overlay::Help { .. } => (66, 23),
         Overlay::Command(_) => (64, 3),
         Overlay::DraftReady { .. } => (68, 11),
         Overlay::ComposeClose(_) => (58, 7),
@@ -1845,6 +1845,10 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                 "inbox",
                 "  /  search      g  folders      1/2/3  filters",
                 "  p  accounts",
+                "",
+                "compose",
+                "  tab  next field      shift+tab  previous field",
+                "  enter on Body  $EDITOR    ctrl+s  review    ctrl+d  save",
                 "",
                 "commands",
                 "  :reload                 :filter unread",
