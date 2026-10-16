@@ -158,6 +158,13 @@ enum Overlay {
         selected: usize,
         items: Vec<AccountItem>,
     },
+    Compose(ComposeState),
+}
+
+struct ComposeState {
+    composer: draft::Composer,
+    field: usize,
+    error: Option<String>,
 }
 
 #[derive(Clone)]
@@ -295,6 +302,12 @@ impl App {
                 status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
             } else if matches!(self.overlay, Some(Overlay::Attachments { .. })) {
                 status_line(&[("j/k", "select"), ("s", "save"), ("o", "open")])
+            } else if matches!(self.overlay, Some(Overlay::Compose(_))) {
+                status_line(&[
+                    ("tab", "next field"),
+                    ("ctrl+s", "review"),
+                    ("esc", "close"),
+                ])
             } else {
                 status_line(&[
                     ("r", "retry"),
@@ -470,6 +483,12 @@ impl App {
             status_line(&[("j/k", "select"), ("enter", "open"), ("esc", "cancel")])
         } else if matches!(self.overlay, Some(Overlay::Attachments { .. })) {
             status_line(&[("j/k", "select"), ("s", "save"), ("o", "open")])
+        } else if matches!(self.overlay, Some(Overlay::Compose(_))) {
+            status_line(&[
+                ("tab", "next field"),
+                ("ctrl+s", "review"),
+                ("esc", "close"),
+            ])
         } else if let Some(notice) = &self.notice {
             action_line(notice, self.undo.is_some())
         } else if self.searching {
@@ -1386,6 +1405,10 @@ impl App {
                 }
                 _ => self.overlay = Some(overlay),
             },
+            Overlay::Compose(_) => match key.code {
+                KeyCode::Esc => {}
+                _ => self.overlay = Some(overlay),
+            },
         }
         true
     }
@@ -1721,6 +1744,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
         Overlay::Links { items, .. } => (72, (items.len() as u16 + 2).min(16)),
         Overlay::Attachments { items, .. } => (64, (items.len() as u16 + 2).min(16)),
         Overlay::Accounts { items, .. } => (52, (items.len() as u16 + 2).min(16)),
+        Overlay::Compose(_) => (76, 17),
     };
     let screen = frame.area();
     let area = Rect::new(
@@ -1920,7 +1944,77 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
             let mut state = ListState::default().with_selected(Some(*selected));
             frame.render_stateful_widget(list, area, &mut state);
         }
+        Overlay::Compose(state) => draw_compose(frame, area, state),
     }
+}
+
+fn draw_compose(frame: &mut Frame, area: Rect, state: &ComposeState) {
+    let block = Block::bordered()
+        .border_style(theme::border(true))
+        .title_style(theme::title(true))
+        .title(" compose ")
+        .bg(theme::SURFACE);
+    let inner = block.inner(area);
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(7),
+        Constraint::Length(2),
+        Constraint::Min(1),
+    ])
+    .split(inner);
+    frame.render_widget(
+        Paragraph::new(format!("From     {}", state.composer.from)).style(theme::muted()),
+        rows[0],
+    );
+    let body = state.composer.body_stats().unwrap_or_default();
+    let values = [
+        ("To", state.composer.to.as_str()),
+        ("Cc", state.composer.cc.as_str()),
+        ("Bcc", state.composer.bcc.as_str()),
+        ("Subject", state.composer.subject.as_str()),
+        ("Files", state.composer.attachments.as_str()),
+        (
+            "Body",
+            if body.1 == 0 {
+                "$EDITOR · empty"
+            } else {
+                "$EDITOR · text ready"
+            },
+        ),
+    ];
+    let items: Vec<ListItem> = values
+        .iter()
+        .map(|(label, value)| ListItem::new(format!("{label:<8} {value}")))
+        .collect();
+    let list = List::new(items)
+        .style(theme::text())
+        .highlight_symbol("▌ ")
+        .highlight_style(theme::selection());
+    let mut selected = ListState::default().with_selected(Some(state.field));
+    frame.render_stateful_widget(list, rows[1], &mut selected);
+    let feedback = state
+        .error
+        .as_deref()
+        .unwrap_or("Use ; between attachment paths.");
+    frame.render_widget(
+        Paragraph::new(feedback)
+            .style(if state.error.is_some() {
+                theme::title(true)
+            } else {
+                theme::muted()
+            })
+            .wrap(Wrap { trim: true }),
+        rows[2],
+    );
+    frame.render_widget(
+        Paragraph::new(
+            "tab / shift+tab  move field    enter on Body  open $EDITOR\nctrl+s  review    ctrl+d  save draft    esc  close",
+        )
+        .style(theme::muted()),
+        rows[3],
+    );
 }
 
 fn reader_is_docked(width: u16, reader_open: bool) -> bool {
