@@ -17,6 +17,20 @@ pub struct Summary {
     pub attachments: Vec<PathBuf>,
 }
 
+#[derive(Clone, Debug)]
+pub struct Composer {
+    pub from: String,
+    pub to: String,
+    pub cc: String,
+    pub bcc: String,
+    pub subject: String,
+    pub attachments: String,
+    pub body_path: PathBuf,
+    reply_to: Option<String>,
+    references: Vec<String>,
+    message_id: String,
+}
+
 #[derive(Debug)]
 pub struct DraftError(String);
 
@@ -27,6 +41,114 @@ impl fmt::Display for DraftError {
 }
 
 impl std::error::Error for DraftError {}
+
+impl Composer {
+    pub fn new(
+        reply_to: Option<&Mail>,
+        identity: Option<&str>,
+        signature: Option<&str>,
+    ) -> io::Result<Self> {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let body_path =
+            std::env::temp_dir().join(format!("termail-body-{}-{nonce}.txt", std::process::id()));
+        let body = signature
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| format!("\n\n-- \n{}", value.trim()))
+            .unwrap_or_default();
+        fs::write(&body_path, body)?;
+        let subject = reply_to
+            .map(|mail| {
+                if mail.subject.to_lowercase().starts_with("re:") {
+                    mail.subject.clone()
+                } else {
+                    format!("Re: {}", mail.subject)
+                }
+            })
+            .unwrap_or_default();
+        let mut references = reply_to
+            .map(|mail| mail.references.clone())
+            .unwrap_or_default();
+        if let Some(mail) = reply_to {
+            references.push(mail.id.clone());
+            references.dedup();
+        }
+        Ok(Self {
+            from: identity.unwrap_or_default().into(),
+            to: reply_to.map(|mail| mail.from.clone()).unwrap_or_default(),
+            cc: String::new(),
+            bcc: String::new(),
+            subject,
+            attachments: String::new(),
+            body_path,
+            reply_to: reply_to.map(|mail| mail.id.clone()),
+            references,
+            message_id: format!("termail-{}-{nonce}@localhost", std::process::id()),
+        })
+    }
+
+    pub fn summary(&self, base: &Path) -> Result<Summary, DraftError> {
+        inspect(self.source()?.as_bytes(), base)
+    }
+
+    pub fn message(&self, base: &Path) -> Result<Vec<u8>, DraftError> {
+        prepare(self.source()?.as_bytes(), base)
+    }
+
+    pub fn body_stats(&self) -> io::Result<(usize, usize)> {
+        let body = fs::read_to_string(&self.body_path)?;
+        Ok((body.lines().count(), body.chars().count()))
+    }
+
+    pub fn remove_body(&self) -> io::Result<()> {
+        if self.body_path.exists() {
+            fs::remove_file(&self.body_path)?;
+        }
+        Ok(())
+    }
+
+    fn source(&self) -> Result<String, DraftError> {
+        let body = fs::read_to_string(&self.body_path).map_err(|error| {
+            DraftError(format!(
+                "Unable to read message body {}: {error}",
+                self.body_path.display()
+            ))
+        })?;
+        let mut headers = vec![
+            format!("From: {}", one_line(&self.from)),
+            format!("To: {}", one_line(&self.to)),
+            format!("Cc: {}", one_line(&self.cc)),
+            format!("Bcc: {}", one_line(&self.bcc)),
+            format!("Subject: {}", one_line(&self.subject)),
+        ];
+        headers.extend(
+            self.attachments
+                .split(';')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| format!("Attach: {}", one_line(value))),
+        );
+        if let Some(reply_to) = &self.reply_to {
+            headers.push(format!("In-Reply-To: <{}>", one_line(reply_to)));
+        }
+        if !self.references.is_empty() {
+            headers.push(format!(
+                "References: {}",
+                self.references
+                    .iter()
+                    .map(|id| format!("<{}>", one_line(id)))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+        }
+        headers.push(format!("Message-ID: <{}>", self.message_id));
+        headers.push("MIME-Version: 1.0".into());
+        headers.push("Content-Type: text/plain; charset=utf-8".into());
+        Ok(format!("{}\n\n{body}", headers.join("\n")))
+    }
+}
 
 pub fn create(
     reply_to: Option<&Mail>,
@@ -240,7 +362,30 @@ mod tests {
 
     use crate::mail::Mail;
 
-    use super::{inspect, prepare, template};
+    use super::{Composer, inspect, prepare, template};
+
+    #[test]
+    fn keeps_headers_out_of_the_body_editor() {
+        let mail = Mail::new(
+            "first@example.com",
+            "Ada <ada@example.com>",
+            "Update",
+            "hi",
+            None,
+        );
+        let mut composer =
+            Composer::new(Some(&mail), Some("Tuna <tuna@example.com>"), Some("Tuna")).unwrap();
+        composer.cc = "mert@example.com".into();
+        let body = fs::read_to_string(&composer.body_path).unwrap();
+        let message = String::from_utf8(composer.message(Path::new(".")).unwrap()).unwrap();
+
+        assert!(!body.contains("Subject:"));
+        assert!(body.contains("-- \nTuna"));
+        assert!(message.contains("To: Ada <ada@example.com>"));
+        assert!(message.contains("Cc: mert@example.com"));
+        assert!(message.contains("Subject: Re: Update"));
+        composer.remove_body().unwrap();
+    }
 
     #[test]
     fn builds_reply_headers() {
