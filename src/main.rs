@@ -2045,23 +2045,27 @@ fn draw_compose(frame: &mut Frame, area: Rect, state: &ComposeState) {
     );
     let body = state.composer.body_stats().unwrap_or_default();
     let values = [
-        ("To", state.composer.to.as_str()),
-        ("Cc", state.composer.cc.as_str()),
-        ("Bcc", state.composer.bcc.as_str()),
-        ("Subject", state.composer.subject.as_str()),
-        ("Files", state.composer.attachments.as_str()),
+        ("To", state.composer.to.clone()),
+        ("Cc", state.composer.cc.clone()),
+        ("Bcc", state.composer.bcc.clone()),
+        ("Subject", state.composer.subject.clone()),
+        ("Files", state.composer.attachments.clone()),
         (
             "Body",
-            if body.1 == 0 {
-                "$EDITOR · empty"
-            } else {
-                "$EDITOR · text ready"
-            },
+            format!("$EDITOR · {} lines · {} chars", body.0, body.1),
         ),
     ];
     let items: Vec<ListItem> = values
         .iter()
-        .map(|(label, value)| ListItem::new(format!("{label:<8} {value}")))
+        .enumerate()
+        .map(|(index, (label, value))| {
+            let cursor = if index == state.field && index != ComposeState::BODY_FIELD {
+                "_"
+            } else {
+                ""
+            };
+            ListItem::new(format!("{label:<8} {value}{cursor}"))
+        })
         .collect();
     let list = List::new(items)
         .style(theme::text())
@@ -2163,10 +2167,11 @@ mod tests {
 
     use ratatui::{Terminal, backend::TestBackend};
 
-    use crate::mailbox::MailboxSource;
+    use crate::{draft::Composer, mailbox::MailboxSource};
 
     use super::{
-        MailboxState, Overlay, draw_mailbox_state, draw_overlay, parse_options, reader_is_docked,
+        ComposeState, MailboxState, Overlay, draw_mailbox_state, draw_overlay, parse_options,
+        reader_is_docked,
     };
 
     #[test]
@@ -2211,6 +2216,23 @@ mod tests {
         assert!(
             render_overlay(&Overlay::Command("filter unread".into())).contains(":filter unread_")
         );
+    }
+
+    #[test]
+    fn renders_the_builtin_compose_form() {
+        let composer = Composer::new(None, Some("Tuna <tuna@example.com>"), None).unwrap();
+        let body_path = composer.body_path.clone();
+        let screen = render_overlay(&Overlay::Compose(ComposeState {
+            composer,
+            field: 0,
+            error: None,
+        }));
+
+        assert!(screen.contains("From"));
+        assert!(screen.contains("To       _"));
+        assert!(screen.contains("$EDITOR"));
+        assert!(screen.contains("ctrl+s"));
+        std::fs::remove_file(body_path).unwrap();
     }
 
     fn render_state(state: &MailboxState) -> String {
