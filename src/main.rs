@@ -101,7 +101,7 @@ pub struct App {
     undo: Option<UndoAction>,
     notice: Option<String>,
     mailbox_fingerprint: u64,
-    pending_draft: Option<PathBuf>,
+    pending_editor: Option<ComposeState>,
     overlay: Option<Overlay>,
     config: Config,
     active_folder: String,
@@ -135,13 +135,10 @@ enum Overlay {
     },
     Command(String),
     DraftReady {
-        path: PathBuf,
+        state: ComposeState,
         summary: draft::Summary,
     },
-    DraftIssue {
-        path: PathBuf,
-        error: String,
-    },
+    ComposeClose(ComposeState),
     Folders {
         selected: usize,
         items: Vec<FolderItem>,
@@ -165,6 +162,32 @@ struct ComposeState {
     composer: draft::Composer,
     field: usize,
     error: Option<String>,
+}
+
+impl ComposeState {
+    const FIELD_COUNT: usize = 6;
+    const BODY_FIELD: usize = 5;
+
+    fn value_mut(&mut self) -> Option<&mut String> {
+        match self.field {
+            0 => Some(&mut self.composer.to),
+            1 => Some(&mut self.composer.cc),
+            2 => Some(&mut self.composer.bcc),
+            3 => Some(&mut self.composer.subject),
+            4 => Some(&mut self.composer.attachments),
+            _ => None,
+        }
+    }
+
+    fn move_next(&mut self) {
+        self.field = (self.field + 1) % Self::FIELD_COUNT;
+        self.error = None;
+    }
+
+    fn move_previous(&mut self) {
+        self.field = self.field.checked_sub(1).unwrap_or(Self::FIELD_COUNT - 1);
+        self.error = None;
+    }
 }
 
 #[derive(Clone)]
@@ -226,7 +249,7 @@ impl App {
             undo: None,
             notice: None,
             mailbox_fingerprint: 0,
-            pending_draft: None,
+            pending_editor: None,
             overlay: None,
             config,
             active_folder: "INBOX".into(),
@@ -261,8 +284,8 @@ impl App {
                     }
                 }
             }
-            if let Some(path) = self.pending_draft.take() {
-                terminal = self.edit_draft(path)?;
+            if let Some(state) = self.pending_editor.take() {
+                terminal = self.edit_composer_body(state)?;
             }
         }
 
@@ -289,12 +312,8 @@ impl App {
                 status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
             } else if matches!(self.overlay, Some(Overlay::DraftReady { .. })) {
                 status_line(&[("s", "send"), ("e", "edit"), ("d", "save draft")])
-            } else if matches!(self.overlay, Some(Overlay::DraftIssue { .. })) {
-                status_line(&[
-                    ("e", "fix draft"),
-                    ("d", "save draft"),
-                    ("esc", "keep temp"),
-                ])
+            } else if matches!(self.overlay, Some(Overlay::ComposeClose(_))) {
+                status_line(&[("s", "save draft"), ("d", "discard"), ("esc", "continue")])
             } else if matches!(
                 self.overlay,
                 Some(Overlay::Folders { .. } | Overlay::Links { .. } | Overlay::Accounts { .. })
@@ -470,12 +489,8 @@ impl App {
             status_line(&[("type", "command"), ("enter", "run"), ("esc", "cancel")])
         } else if matches!(self.overlay, Some(Overlay::DraftReady { .. })) {
             status_line(&[("s", "send"), ("e", "edit"), ("d", "save draft")])
-        } else if matches!(self.overlay, Some(Overlay::DraftIssue { .. })) {
-            status_line(&[
-                ("e", "fix draft"),
-                ("d", "save draft"),
-                ("esc", "keep temp"),
-            ])
+        } else if matches!(self.overlay, Some(Overlay::ComposeClose(_))) {
+            status_line(&[("s", "save draft"), ("d", "discard"), ("esc", "continue")])
         } else if matches!(
             self.overlay,
             Some(Overlay::Folders { .. } | Overlay::Links { .. } | Overlay::Accounts { .. })
@@ -1281,8 +1296,38 @@ impl App {
     }
 
     fn handle_overlay_key(&mut self, key: KeyEvent) -> bool {
-        let Some(mut overlay) = self.overlay.take() else {
+        let Some(overlay) = self.overlay.take() else {
             return false;
+        };
+        let mut overlay = match overlay {
+            Overlay::Compose(state) => {
+                self.handle_compose_key(state, key);
+                return true;
+            }
+            Overlay::DraftReady { state, summary } => {
+                match key.code {
+                    KeyCode::Char('s') => self.finish_composer(state, true),
+                    KeyCode::Char('d') => self.finish_composer(state, false),
+                    KeyCode::Char('e') | KeyCode::Esc => {
+                        self.overlay = Some(Overlay::Compose(state));
+                    }
+                    _ => self.overlay = Some(Overlay::DraftReady { state, summary }),
+                }
+                return true;
+            }
+            Overlay::ComposeClose(state) => {
+                match key.code {
+                    KeyCode::Char('s') => self.finish_composer(state, false),
+                    KeyCode::Char('d') => {
+                        let _ = state.composer.remove_body();
+                        self.notice = Some("Draft discarded".into());
+                    }
+                    KeyCode::Esc => self.overlay = Some(Overlay::Compose(state)),
+                    _ => self.overlay = Some(Overlay::ComposeClose(state)),
+                }
+                return true;
+            }
+            overlay => overlay,
         };
         match &mut overlay {
             Overlay::Help { scroll } => match key.code {
@@ -1313,23 +1358,6 @@ impl App {
                 {
                     input.push(character);
                     self.overlay = Some(overlay);
-                }
-                _ => self.overlay = Some(overlay),
-            },
-            Overlay::DraftReady { path, .. } => match key.code {
-                KeyCode::Char('s') => self.finish_draft(path.clone(), true),
-                KeyCode::Char('d') => self.finish_draft(path.clone(), false),
-                KeyCode::Char('e') => self.pending_draft = Some(path.clone()),
-                KeyCode::Esc => {
-                    self.notice = Some(format!("Draft kept at {}", path.display()));
-                }
-                _ => self.overlay = Some(overlay),
-            },
-            Overlay::DraftIssue { path, .. } => match key.code {
-                KeyCode::Char('e') => self.pending_draft = Some(path.clone()),
-                KeyCode::Char('d') => self.finish_draft(path.clone(), false),
-                KeyCode::Esc => {
-                    self.notice = Some(format!("Draft kept at {}", path.display()));
                 }
                 _ => self.overlay = Some(overlay),
             },
@@ -1405,10 +1433,9 @@ impl App {
                 }
                 _ => self.overlay = Some(overlay),
             },
-            Overlay::Compose(_) => match key.code {
-                KeyCode::Esc => {}
-                _ => self.overlay = Some(overlay),
-            },
+            Overlay::DraftReady { .. } | Overlay::ComposeClose(_) | Overlay::Compose(_) => {
+                unreachable!()
+            }
         }
         true
     }
@@ -1471,43 +1498,93 @@ impl App {
             self.notice = Some("Select a message to reply.".into());
             return;
         }
-        match draft::create(
+        match draft::Composer::new(
             mail,
             self.config.identity().as_deref(),
             self.config.signature.as_deref(),
         ) {
-            Ok(path) => self.pending_draft = Some(path),
+            Ok(composer) => {
+                self.overlay = Some(Overlay::Compose(ComposeState {
+                    field: if reply { ComposeState::BODY_FIELD } else { 0 },
+                    composer,
+                    error: None,
+                }));
+            }
             Err(error) => self.notice = Some(format!("Unable to create draft: {error}")),
         }
     }
 
-    fn edit_draft(&mut self, path: PathBuf) -> color_eyre::Result<DefaultTerminal> {
+    fn handle_compose_key(&mut self, mut state: ComposeState, key: KeyEvent) {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
+            let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            match state.composer.summary(&base) {
+                Ok(summary) => self.overlay = Some(Overlay::DraftReady { state, summary }),
+                Err(error) => {
+                    state.error = Some(error.to_string());
+                    self.overlay = Some(Overlay::Compose(state));
+                }
+            }
+            return;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('d') {
+            self.finish_composer(state, false);
+            return;
+        }
+        match key.code {
+            KeyCode::Esc => self.overlay = Some(Overlay::ComposeClose(state)),
+            KeyCode::Tab | KeyCode::Down => {
+                state.move_next();
+                self.overlay = Some(Overlay::Compose(state));
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                state.move_previous();
+                self.overlay = Some(Overlay::Compose(state));
+            }
+            KeyCode::Enter if state.field == ComposeState::BODY_FIELD => {
+                self.pending_editor = Some(state);
+            }
+            KeyCode::Enter => {
+                state.move_next();
+                self.overlay = Some(Overlay::Compose(state));
+            }
+            KeyCode::Backspace => {
+                if let Some(value) = state.value_mut() {
+                    value.pop();
+                }
+                state.error = None;
+                self.overlay = Some(Overlay::Compose(state));
+            }
+            KeyCode::Char(character)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT)
+                    && state.field != ComposeState::BODY_FIELD =>
+            {
+                if let Some(value) = state.value_mut() {
+                    value.push(character);
+                }
+                state.error = None;
+                self.overlay = Some(Overlay::Compose(state));
+            }
+            _ => self.overlay = Some(Overlay::Compose(state)),
+        }
+    }
+
+    fn edit_composer_body(
+        &mut self,
+        mut state: ComposeState,
+    ) -> color_eyre::Result<DefaultTerminal> {
         execute!(stdout(), DisableMouseCapture)?;
         ratatui::restore();
-        let result = self.run_editor(&path);
+        let result = self.run_editor(&state.composer.body_path);
         let terminal = ratatui::init();
         execute!(stdout(), EnableMouseCapture)?;
 
-        match result {
-            Ok(()) => {
-                self.notice = None;
-                let contents = fs::read(&path)?;
-                let base = std::env::current_dir()?;
-                self.overlay = match draft::inspect(&contents, &base) {
-                    Ok(summary) => Some(Overlay::DraftReady { path, summary }),
-                    Err(error) => Some(Overlay::DraftIssue {
-                        path,
-                        error: error.to_string(),
-                    }),
-                };
-            }
-            Err(error) => {
-                self.notice = Some(format!(
-                    "Unable to save draft: {error}. Draft kept at {}",
-                    path.display()
-                ));
-            }
+        if let Err(error) = result {
+            state.error = Some(format!(
+                "Unable to open $EDITOR: {error}. Check editor in config.toml."
+            ));
         }
+        self.overlay = Some(Overlay::Compose(state));
         Ok(terminal)
     }
 
@@ -1523,64 +1600,61 @@ impl App {
         Ok(())
     }
 
-    fn finish_draft(&mut self, path: PathBuf, send: bool) {
-        let result = fs::read(&path).map_err(color_eyre::Report::from);
-        let Ok(contents) = result else {
-            self.notice = Some(format!(
-                "Unable to read draft. Draft kept at {}",
-                path.display()
-            ));
-            return;
+    fn finish_composer(&mut self, mut state: ComposeState, send: bool) {
+        let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let contents = if send {
+            state.composer.message(&base)
+        } else {
+            state.composer.draft_message(&base)
+        };
+        let contents = match contents {
+            Ok(contents) => contents,
+            Err(error) => {
+                state.error = Some(error.to_string());
+                self.overlay = Some(Overlay::Compose(state));
+                return;
+            }
         };
         if send {
-            let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            let contents = match draft::prepare(&contents, &base) {
-                Ok(contents) => contents,
-                Err(error) => {
-                    self.notice = Some(format!(
-                        "Unable to prepare message: {error}. Draft kept at {}",
-                        path.display()
-                    ));
-                    return;
-                }
-            };
             match sender::send(&self.config.send_command, &contents) {
                 Ok(()) => match self.source.save_sent(&contents) {
                     Ok(_) => {
-                        let _ = fs::remove_file(&path);
+                        let _ = state.composer.remove_body();
                         self.notice = Some("Message sent".into());
                     }
                     Err(error) => {
+                        let _ = state.composer.remove_body();
                         self.notice = Some(format!(
-                            "Message sent, but no Sent copy was saved: {error}. Draft kept at {}",
-                            path.display()
+                            "Message sent, but no Sent copy was saved: {error}. Check the Sent folder."
                         ));
                     }
                 },
                 Err(error) => match self.source.save_outbox(&contents) {
                     Ok(_) => {
-                        let _ = fs::remove_file(&path);
+                        let _ = state.composer.remove_body();
                         self.notice = Some(format!("Send failed: {error}. Queued in Outbox."));
                     }
                     Err(queue_error) => {
-                        self.notice = Some(format!(
-                            "Send failed: {error}. Unable to queue: {queue_error}. Draft kept at {}",
-                            path.display()
+                        state.error = Some(format!(
+                            "Send failed: {error}. Unable to queue: {queue_error}. Save the draft and retry."
                         ));
+                        self.overlay = Some(Overlay::Compose(state));
+                        return;
                     }
                 },
             }
         } else {
             match self.source.save_draft(&contents) {
                 Ok(_) => {
-                    let _ = fs::remove_file(&path);
+                    let _ = state.composer.remove_body();
                     self.notice = Some("Draft saved".into());
                 }
                 Err(error) => {
-                    self.notice = Some(format!(
-                        "Unable to save draft: {error}. Draft kept at {}",
-                        path.display()
+                    state.error = Some(format!(
+                        "Unable to save draft: {error}. Check the Maildir and retry."
                     ));
+                    self.overlay = Some(Overlay::Compose(state));
+                    return;
                 }
             }
         }
@@ -1739,7 +1813,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
         Overlay::Help { .. } => (58, 19),
         Overlay::Command(_) => (64, 3),
         Overlay::DraftReady { .. } => (68, 11),
-        Overlay::DraftIssue { .. } => (68, 9),
+        Overlay::ComposeClose(_) => (58, 7),
         Overlay::Folders { items, .. } => (50, (items.len() as u16 + 2).min(18)),
         Overlay::Links { items, .. } => (72, (items.len() as u16 + 2).min(16)),
         Overlay::Attachments { items, .. } => (64, (items.len() as u16 + 2).min(16)),
@@ -1819,7 +1893,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
             };
             frame.render_widget(
                 Paragraph::new(format!(
-                    "To: {}{cc}{bcc}\nSubject: {}\nAttachments: {}\n\n s  Send     e  Edit     d  Save draft     esc  Keep temporary file",
+                    "To: {}{cc}{bcc}\nSubject: {}\nAttachments: {}\n\n s  Send     e  Edit     d  Save draft     esc  Back",
                     summary.to,
                     summary.subject,
                     summary.attachments.len()
@@ -1836,17 +1910,18 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                 area,
             );
         }
-        Overlay::DraftIssue { error, .. } => {
+        Overlay::ComposeClose(_) => {
             frame.render_widget(
-                Paragraph::new(format!(
-                    "Unable to send this draft\n\n{error}\n\n e  Edit draft     d  Save draft     esc  Keep temporary file"
-                ))
+                Paragraph::new(
+                    "Close this message?\n\n s  Save draft     d  Discard message     esc  Continue editing",
+                )
                 .style(theme::text())
+                .alignment(Alignment::Center)
                 .block(
                     Block::bordered()
                         .border_style(theme::border(true))
                         .title_style(theme::title(true))
-                        .title(" draft needs attention ")
+                        .title(" unsaved message ")
                         .bg(theme::SURFACE),
                 )
                 .wrap(Wrap { trim: true }),
