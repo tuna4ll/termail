@@ -23,8 +23,9 @@ server:
 cargo run -- --config sandbox/config.toml
 ```
 
-Compose with `c`, close the editor, then select Send. The built-in test transport appends the full
-message to `sandbox/sent.log`, while Termail stores its Maildir copy in
+Compose with `c`, fill in the message headers, then open the Body row in `$EDITOR`. Review with
+`Ctrl+S` and select Send. The built-in test transport appends the full message to
+`sandbox/sent.log`, while Termail stores its Maildir copy in
 `sandbox/maildir/.Sent/cur`. Archive, Trash, Drafts and Outbox stay inside the sandbox too.
 Press `p` to switch to the work account or the unified inbox. Its sample message includes HTML, a
 safe web link and an attachment. Saved attachments go to `sandbox/downloads`.
@@ -104,13 +105,15 @@ download directory. Existing single-account configuration remains supported.
 | `:` | Open the command palette |
 | `?` | Show all shortcuts |
 
-After editing, choose Send or Save draft. Failed sends are retained in `.Outbox/new`; successful
-sends are copied to `.Sent/cur`. Maildir++ folders are created when first used.
+The compose form owns `From`, `To`, `Cc`, `Bcc`, `Subject` and attachments. `$EDITOR` receives only
+the plain-text body, so no email headers or MIME syntax need to be edited by hand. Separate multiple
+attachment paths with `;`, for example `sandbox/files/example.txt; /path/to/report.pdf`.
 
-Drafts support `To`, `Cc`, `Bcc`, `Subject` and repeated `Attach` headers. Add one file per line,
-for example `Attach: sandbox/files/example.txt`. Termail validates recipients and attachments,
-then shows a summary before sending. HTML messages are converted to terminal text without loading
-remote images. Links open only after explicit selection.
+`Ctrl+S` validates the message and opens the send summary. `Ctrl+D` saves an unfinished draft.
+Closing an unsaved message offers Save draft, Discard message and Continue editing. Failed sends
+are retained in `.Outbox/new`; successful sends are copied to `.Sent/cur`. Maildir++ folders are
+created when first used. HTML messages are converted to terminal text without loading remote
+images. Links open only after explicit selection.
 
 ## Commands
 
