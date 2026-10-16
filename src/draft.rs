@@ -17,7 +17,7 @@ pub struct Summary {
     pub attachments: Vec<PathBuf>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Composer {
     pub from: String,
     pub to: String,
@@ -151,6 +151,12 @@ impl Composer {
         headers.push("MIME-Version: 1.0".into());
         headers.push("Content-Type: text/plain; charset=utf-8".into());
         Ok(format!("{}\n\n{body}", headers.join("\n")))
+    }
+}
+
+impl Drop for Composer {
+    fn drop(&mut self) {
+        let _ = self.remove_body();
     }
 }
 
