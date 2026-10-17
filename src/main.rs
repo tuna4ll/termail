@@ -1305,25 +1305,27 @@ impl App {
                 return true;
             }
             Overlay::DraftReady { state, summary } => {
-                match key.code {
-                    KeyCode::Char('s') => self.finish_composer(state, true),
-                    KeyCode::Char('d') => self.finish_composer(state, false),
-                    KeyCode::Char('e') | KeyCode::Esc => {
-                        self.overlay = Some(Overlay::Compose(state));
-                    }
-                    _ => self.overlay = Some(Overlay::DraftReady { state, summary }),
+                if action_key(key, 's') {
+                    self.finish_composer(state, true);
+                } else if action_key(key, 'd') {
+                    self.finish_composer(state, false);
+                } else if action_key(key, 'e') || key.code == KeyCode::Esc {
+                    self.overlay = Some(Overlay::Compose(state));
+                } else {
+                    self.overlay = Some(Overlay::DraftReady { state, summary });
                 }
                 return true;
             }
             Overlay::ComposeClose(state) => {
-                match key.code {
-                    KeyCode::Char('s') => self.finish_composer(state, false),
-                    KeyCode::Char('d') => {
-                        let _ = state.composer.remove_body();
-                        self.notice = Some("Draft discarded".into());
-                    }
-                    KeyCode::Esc => self.overlay = Some(Overlay::Compose(state)),
-                    _ => self.overlay = Some(Overlay::ComposeClose(state)),
+                if action_key(key, 's') {
+                    self.finish_composer(state, false);
+                } else if action_key(key, 'd') {
+                    let _ = state.composer.remove_body();
+                    self.notice = Some("Draft discarded".into());
+                } else if key.code == KeyCode::Esc {
+                    self.overlay = Some(Overlay::Compose(state));
+                } else {
+                    self.overlay = Some(Overlay::ComposeClose(state));
                 }
                 return true;
             }
@@ -2104,6 +2106,13 @@ fn reader_is_docked(width: u16, reader_open: bool) -> bool {
     reader_open && width >= MIN_DOCK_WIDTH
 }
 
+fn action_key(key: KeyEvent, expected: char) -> bool {
+    matches!(key.code, KeyCode::Char(value) if value.eq_ignore_ascii_case(&expected))
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+}
+
 struct CliOptions {
     source: Option<MailboxSource>,
     config_path: Option<PathBuf>,
@@ -2169,13 +2178,14 @@ fn expand_path(value: &str) -> PathBuf {
 mod tests {
     use std::{ffi::OsString, path::PathBuf};
 
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
 
     use crate::{draft::Composer, mailbox::MailboxSource};
 
     use super::{
-        ComposeState, MailboxState, Overlay, draw_mailbox_state, draw_overlay, parse_options,
-        reader_is_docked,
+        ComposeState, MailboxState, Overlay, action_key, draw_mailbox_state, draw_overlay,
+        parse_options, reader_is_docked,
     };
 
     #[test]
@@ -2183,6 +2193,22 @@ mod tests {
         assert!(reader_is_docked(120, true));
         assert!(!reader_is_docked(100, true));
         assert!(!reader_is_docked(120, false));
+    }
+
+    #[test]
+    fn accepts_shifted_action_keys() {
+        assert!(action_key(
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
+            's'
+        ));
+        assert!(action_key(
+            KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT),
+            's'
+        ));
+        assert!(!action_key(
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+            's'
+        ));
     }
 
     #[test]
