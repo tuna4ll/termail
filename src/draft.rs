@@ -14,6 +14,7 @@ pub struct Summary {
     pub cc: String,
     pub bcc: String,
     pub subject: String,
+    pub format: MessageFormat,
     pub attachments: Vec<PathBuf>,
 }
 
@@ -249,6 +250,12 @@ fn inspect_message(
             .next()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "(no subject)".into()),
+        format: header_values(headers, "content-type")
+            .into_iter()
+            .next()
+            .filter(|value| value.to_ascii_lowercase().starts_with("text/html"))
+            .map(|_| MessageFormat::Html)
+            .unwrap_or(MessageFormat::Plain),
         attachments,
     })
 }
@@ -401,8 +408,10 @@ mod tests {
         composer.format = MessageFormat::Html;
         fs::write(&composer.body_path, "<p>hello</p>").unwrap();
 
+        let summary = composer.summary(Path::new(".")).unwrap();
         let message = String::from_utf8(composer.message(Path::new(".")).unwrap()).unwrap();
 
+        assert_eq!(summary.format, MessageFormat::Html);
         assert!(message.contains("Content-Type: text/html; charset=utf-8"));
         assert!(message.ends_with("<p>hello</p>"));
         composer.remove_body().unwrap();

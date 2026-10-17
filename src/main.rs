@@ -1917,9 +1917,10 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
             };
             frame.render_widget(
                 Paragraph::new(format!(
-                    "To: {}{cc}{bcc}\nSubject: {}\nAttachments: {}\n\n s  Send     e  Edit     d  Save draft     esc  Back",
+                    "To: {}{cc}{bcc}\nSubject: {}\nFormat: {} · Attachments: {}\n\n s  Send     e  Edit     d  Save draft     esc  Back",
                     summary.to,
                     summary.subject,
+                    summary.format.label(),
                     summary.attachments.len()
                 ))
                 .style(theme::text())
