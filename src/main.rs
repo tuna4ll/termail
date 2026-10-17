@@ -2225,7 +2225,6 @@ mod tests {
     #[test]
     fn renders_the_builtin_compose_form() {
         let composer = Composer::new(None, Some("Tuna <tuna@example.com>"), None).unwrap();
-        let body_path = composer.body_path.clone();
         let screen = render_overlay(&Overlay::Compose(ComposeState {
             composer,
             field: 0,
@@ -2236,7 +2235,6 @@ mod tests {
         assert!(screen.contains("To       _"));
         assert!(screen.contains("$EDITOR"));
         assert!(screen.contains("ctrl+s"));
-        std::fs::remove_file(body_path).unwrap();
     }
 
     fn render_state(state: &MailboxState) -> String {
