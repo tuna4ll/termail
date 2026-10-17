@@ -90,10 +90,12 @@ impl Composer {
     }
 
     pub fn summary(&self, base: &Path) -> Result<Summary, DraftError> {
+        self.validate_identity()?;
         inspect(self.source()?.as_bytes(), base)
     }
 
     pub fn message(&self, base: &Path) -> Result<Vec<u8>, DraftError> {
+        self.validate_identity()?;
         prepare(self.source()?.as_bytes(), base)
     }
 
@@ -111,6 +113,16 @@ impl Composer {
             fs::remove_file(&self.body_path)?;
         }
         Ok(())
+    }
+
+    fn validate_identity(&self) -> Result<(), DraftError> {
+        if self.from.trim().is_empty() {
+            Err(DraftError(
+                "Set email in config.toml before sending.".into(),
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     fn source(&self) -> Result<String, DraftError> {
@@ -391,6 +403,17 @@ mod tests {
 
         assert!(message.contains("To: \r\n"));
         assert!(message.contains("Subject: \r\n"));
+        composer.remove_body().unwrap();
+    }
+
+    #[test]
+    fn explains_missing_sender_identity() {
+        let mut composer = Composer::new(None, None, None).unwrap();
+        composer.to = "ada@example.com".into();
+
+        let error = composer.summary(Path::new(".")).unwrap_err();
+
+        assert!(error.to_string().contains("Set email"));
         composer.remove_body().unwrap();
     }
 }
