@@ -23,8 +23,9 @@ server:
 cargo run -- --config sandbox/config.toml
 ```
 
-Compose with `c`, fill in the message headers, then open the Body row in `$EDITOR`. Review with
-`Ctrl+S` and select Send. The built-in test transport appends the full message to
+Compose with `c`, fill in the message headers, choose Plain text or HTML, then open the Body box in
+`$EDITOR`. Reply with `r` to open the prepared body in `$EDITOR` immediately. Review with `Ctrl+S`
+and select Send. The built-in test transport appends the full message to
 `sandbox/sent.log`, while Termail stores its Maildir copy in
 `sandbox/maildir/.Sent/cur`. Archive, Trash, Drafts and Outbox stay inside the sandbox too.
 Press `p` to switch to the work account or the unified inbox. Its sample message includes HTML, a
@@ -96,7 +97,7 @@ download directory. Existing single-account configuration remains supported.
 | `a` | Move the message to `.Archive` |
 | `d` | Move the message to `.Trash` |
 | `u` | Undo the last message action |
-| `c` / `r` | Compose a message or reply in `$EDITOR` |
+| `c` / `r` | Compose a message or open a reply in `$EDITOR` |
 | `g` | Open the folder navigator |
 | `p` | Switch account or open the unified inbox |
 | `l` | List the open message's web links |
@@ -105,9 +106,10 @@ download directory. Existing single-account configuration remains supported.
 | `:` | Open the command palette |
 | `?` | Show all shortcuts |
 
-The compose form owns `From`, `To`, `Cc`, `Bcc`, `Subject` and attachments. `$EDITOR` receives only
-the plain-text body, so no email headers or MIME syntax need to be edited by hand. Separate multiple
-attachment paths with `;`, for example `sandbox/files/example.txt; /path/to/report.pdf`.
+The compose form owns `From`, `To`, `Cc`, `Bcc`, `Subject`, format and attachments. `$EDITOR`
+receives only the Plain text or HTML body, so no email headers or MIME syntax need to be edited by
+hand. Use the arrow keys or Space on Format. Separate multiple attachment paths with `;`, for
+example `sandbox/files/example.txt; /path/to/report.pdf`.
 
 `Ctrl+S` validates the message and opens the send summary. `Ctrl+D` saves an unfinished draft.
 Closing an unsaved message offers Save draft, Discard message and Continue editing. Failed sends
