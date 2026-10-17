@@ -1507,11 +1507,16 @@ impl App {
             self.config.signature.as_deref(),
         ) {
             Ok(composer) => {
-                self.overlay = Some(Overlay::Compose(ComposeState {
+                let state = ComposeState {
                     field: if reply { ComposeState::BODY_FIELD } else { 0 },
                     composer,
                     error: None,
-                }));
+                };
+                if reply {
+                    self.pending_editor = Some(state);
+                } else {
+                    self.overlay = Some(Overlay::Compose(state));
+                }
             }
             Err(error) => self.notice = Some(format!("Unable to create draft: {error}")),
         }
