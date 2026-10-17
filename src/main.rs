@@ -1868,7 +1868,8 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
                 "",
                 "compose",
                 "  tab  next field      shift+tab  previous field",
-                "  enter on Body  $EDITOR    ctrl+s  review    ctrl+d  save",
+                "  arrows/space  format      enter on Body  $EDITOR",
+                "  ctrl+s  review             ctrl+d  save draft",
                 "",
                 "commands",
                 "  :reload                 :filter unread",
@@ -2239,14 +2240,19 @@ mod tests {
 
     #[test]
     fn accepts_shifted_action_keys() {
-        assert!(action_key(
-            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
-            's'
-        ));
-        assert!(action_key(
-            KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT),
-            's'
-        ));
+        for action in ['s', 'e', 'd'] {
+            assert!(action_key(
+                KeyEvent::new(KeyCode::Char(action), KeyModifiers::NONE),
+                action
+            ));
+            assert!(action_key(
+                KeyEvent::new(
+                    KeyCode::Char(action.to_ascii_uppercase()),
+                    KeyModifiers::SHIFT
+                ),
+                action
+            ));
+        }
         assert!(!action_key(
             KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
             's'
@@ -2300,7 +2306,10 @@ mod tests {
         }));
 
         assert!(screen.contains("From"));
+        assert!(screen.contains("headers"));
         assert!(screen.contains("To       _"));
+        assert!(screen.contains("Plain text"));
+        assert!(screen.contains("body"));
         assert!(screen.contains("$EDITOR"));
         assert!(screen.contains("ctrl+s"));
     }
