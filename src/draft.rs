@@ -17,6 +17,35 @@ pub struct Summary {
     pub attachments: Vec<PathBuf>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MessageFormat {
+    Plain,
+    Html,
+}
+
+impl MessageFormat {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Plain => "Plain text",
+            Self::Html => "HTML",
+        }
+    }
+
+    const fn content_type(self) -> &'static str {
+        match self {
+            Self::Plain => "text/plain",
+            Self::Html => "text/html",
+        }
+    }
+
+    pub fn toggle(&mut self) {
+        *self = match self {
+            Self::Plain => Self::Html,
+            Self::Html => Self::Plain,
+        };
+    }
+}
+
 #[derive(Debug)]
 pub struct Composer {
     pub from: String,
@@ -25,6 +54,7 @@ pub struct Composer {
     pub bcc: String,
     pub subject: String,
     pub attachments: String,
+    pub format: MessageFormat,
     pub body_path: PathBuf,
     reply_to: Option<String>,
     references: Vec<String>,
@@ -82,6 +112,7 @@ impl Composer {
             bcc: String::new(),
             subject,
             attachments: String::new(),
+            format: MessageFormat::Plain,
             body_path,
             reply_to: reply_to.map(|mail| mail.id.clone()),
             references,
@@ -161,7 +192,10 @@ impl Composer {
         }
         headers.push(format!("Message-ID: <{}>", self.message_id));
         headers.push("MIME-Version: 1.0".into());
-        headers.push("Content-Type: text/plain; charset=utf-8".into());
+        headers.push(format!(
+            "Content-Type: {}; charset=utf-8",
+            self.format.content_type()
+        ));
         Ok(format!("{}\n\n{body}", headers.join("\n")))
     }
 }
@@ -241,6 +275,12 @@ fn prepare_message(
     }
     let text = String::from_utf8_lossy(contents);
     let (headers, body) = split_message(&text);
+    let body_type = header_values(headers, "content-type")
+        .into_iter()
+        .next()
+        .filter(|value| value.to_ascii_lowercase().starts_with("text/html"))
+        .map(|_| "text/html")
+        .unwrap_or("text/plain");
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -262,7 +302,7 @@ fn prepare_message(
         "Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n"
     ));
     message.push_str(&format!(
-        "--{boundary}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{}\r\n",
+        "--{boundary}\r\nContent-Type: {body_type}; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{}\r\n",
         body.trim_start_matches(['\r', '\n'])
     ));
     for path in summary.attachments {
@@ -326,7 +366,7 @@ mod tests {
 
     use crate::mail::Mail;
 
-    use super::{Composer, inspect, prepare};
+    use super::{Composer, MessageFormat, inspect, prepare};
 
     #[test]
     fn keeps_headers_out_of_the_body_editor() {
@@ -355,6 +395,20 @@ mod tests {
     }
 
     #[test]
+    fn builds_html_messages() {
+        let mut composer = Composer::new(None, Some("tuna@example.com"), None).unwrap();
+        composer.to = "ada@example.com".into();
+        composer.format = MessageFormat::Html;
+        fs::write(&composer.body_path, "<p>hello</p>").unwrap();
+
+        let message = String::from_utf8(composer.message(Path::new(".")).unwrap()).unwrap();
+
+        assert!(message.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(message.ends_with("<p>hello</p>"));
+        composer.remove_body().unwrap();
+    }
+
+    #[test]
     fn validates_recipients_and_builds_attachments() {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -374,6 +428,14 @@ mod tests {
         assert!(message.contains("filename=\"notes.txt\""));
         assert!(message.contains("aGVsbG8="));
         assert!(!message.contains("Attach: notes.txt"));
+
+        let html = prepare(
+            b"To: ada@example.com\nAttach: notes.txt\nContent-Type: text/html; charset=utf-8\n\n<p>hello</p>",
+            &root,
+        )
+        .unwrap();
+        let html = String::from_utf8(html).unwrap();
+        assert!(html.contains("Content-Type: text/html; charset=utf-8"));
         fs::remove_dir_all(root).unwrap();
     }
 

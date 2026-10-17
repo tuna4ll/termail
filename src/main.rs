@@ -165,8 +165,9 @@ struct ComposeState {
 }
 
 impl ComposeState {
-    const FIELD_COUNT: usize = 6;
-    const BODY_FIELD: usize = 5;
+    const FIELD_COUNT: usize = 7;
+    const FORMAT_FIELD: usize = 4;
+    const BODY_FIELD: usize = 6;
 
     fn value_mut(&mut self) -> Option<&mut String> {
         match self.field {
@@ -174,7 +175,7 @@ impl ComposeState {
             1 => Some(&mut self.composer.cc),
             2 => Some(&mut self.composer.bcc),
             3 => Some(&mut self.composer.subject),
-            4 => Some(&mut self.composer.attachments),
+            5 => Some(&mut self.composer.attachments),
             _ => None,
         }
     }
@@ -1542,8 +1543,19 @@ impl App {
                 state.move_previous();
                 self.overlay = Some(Overlay::Compose(state));
             }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
+                if state.field == ComposeState::FORMAT_FIELD =>
+            {
+                state.composer.format.toggle();
+                self.overlay = Some(Overlay::Compose(state));
+            }
             KeyCode::Enter if state.field == ComposeState::BODY_FIELD => {
                 self.pending_editor = Some(state);
+            }
+            KeyCode::Enter if state.field == ComposeState::FORMAT_FIELD => {
+                state.composer.format.toggle();
+                state.move_next();
+                self.overlay = Some(Overlay::Compose(state));
             }
             KeyCode::Enter => {
                 state.move_next();
@@ -1559,6 +1571,7 @@ impl App {
             KeyCode::Char(character)
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
                     && !key.modifiers.contains(KeyModifiers::ALT)
+                    && state.field != ComposeState::FORMAT_FIELD
                     && state.field != ComposeState::BODY_FIELD =>
             {
                 if let Some(value) = state.value_mut() {
@@ -1820,7 +1833,7 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay) {
         Overlay::Links { items, .. } => (72, (items.len() as u16 + 2).min(16)),
         Overlay::Attachments { items, .. } => (64, (items.len() as u16 + 2).min(16)),
         Overlay::Accounts { items, .. } => (52, (items.len() as u16 + 2).min(16)),
-        Overlay::Compose(_) => (76, 17),
+        Overlay::Compose(_) => (78, 20),
     };
     let screen = frame.area();
     let area = Rect::new(
@@ -2040,7 +2053,8 @@ fn draw_compose(frame: &mut Frame, area: Rect, state: &ComposeState) {
     frame.render_widget(block, area);
     let rows = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(7),
+        Constraint::Length(8),
+        Constraint::Length(4),
         Constraint::Length(2),
         Constraint::Min(1),
     ])
@@ -2049,23 +2063,19 @@ fn draw_compose(frame: &mut Frame, area: Rect, state: &ComposeState) {
         Paragraph::new(format!("From     {}", state.composer.from)).style(theme::muted()),
         rows[0],
     );
-    let body = state.composer.body_stats().unwrap_or_default();
     let values = [
         ("To", state.composer.to.clone()),
         ("Cc", state.composer.cc.clone()),
         ("Bcc", state.composer.bcc.clone()),
         ("Subject", state.composer.subject.clone()),
+        ("Format", format!("< {} >", state.composer.format.label())),
         ("Files", state.composer.attachments.clone()),
-        (
-            "Body",
-            format!("$EDITOR · {} lines · {} chars", body.0, body.1),
-        ),
     ];
     let items: Vec<ListItem> = values
         .iter()
         .enumerate()
         .map(|(index, (label, value))| {
-            let cursor = if index == state.field && index != ComposeState::BODY_FIELD {
+            let cursor = if index == state.field && index != ComposeState::FORMAT_FIELD {
                 "_"
             } else {
                 ""
@@ -2076,9 +2086,35 @@ fn draw_compose(frame: &mut Frame, area: Rect, state: &ComposeState) {
     let list = List::new(items)
         .style(theme::text())
         .highlight_symbol("▌ ")
-        .highlight_style(theme::selection());
-    let mut selected = ListState::default().with_selected(Some(state.field));
+        .highlight_style(theme::selection())
+        .block(
+            Block::bordered()
+                .border_style(theme::border(state.field != ComposeState::BODY_FIELD))
+                .title_style(theme::title(state.field != ComposeState::BODY_FIELD))
+                .title(" headers "),
+        );
+    let mut selected = ListState::default()
+        .with_selected((state.field != ComposeState::BODY_FIELD).then_some(state.field));
     frame.render_stateful_widget(list, rows[1], &mut selected);
+    let body = state.composer.body_stats().unwrap_or_default();
+    frame.render_widget(
+        Paragraph::new(format!(
+            "$EDITOR\n{} lines · {} chars · press enter to edit",
+            body.0, body.1
+        ))
+        .style(if state.field == ComposeState::BODY_FIELD {
+            theme::selection()
+        } else {
+            theme::text()
+        })
+        .block(
+            Block::bordered()
+                .border_style(theme::border(state.field == ComposeState::BODY_FIELD))
+                .title_style(theme::title(state.field == ComposeState::BODY_FIELD))
+                .title(" body "),
+        ),
+        rows[2],
+    );
     let feedback = state
         .error
         .as_deref()
@@ -2091,14 +2127,14 @@ fn draw_compose(frame: &mut Frame, area: Rect, state: &ComposeState) {
                 theme::muted()
             })
             .wrap(Wrap { trim: true }),
-        rows[2],
+        rows[3],
     );
     frame.render_widget(
         Paragraph::new(
-            "tab / shift+tab  move field    enter on Body  open $EDITOR\nctrl+s  review    ctrl+d  save draft    esc  close",
+            "tab / shift+tab  move    arrows / space  change format    enter  edit body\nctrl+s  review    ctrl+d  save draft    esc  close",
         )
         .style(theme::muted()),
-        rows[3],
+        rows[4],
     );
 }
 
